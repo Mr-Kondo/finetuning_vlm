@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlm-lab"
+version = "0.1.0"
+description = "Fine-tuning Qwen3-VL-4B-Instruct on CORD v2 via 4-bit QLoRA on Google Colab."
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=2.19",
+    # 4.57.0 added Qwen3-VL support but was yanked by PyPI (broken setup);
+    # 4.57.1 is the first installable release with `qwen3_vl` registered
+    # (verified directly: AutoConfig.for_model("qwen3_vl") on 4.57.1).
+    "transformers>=4.57.1",
+    "torch>=2.2",
+    "pillow>=10.0",
+    # transformers' AutoProcessor for Qwen3-VL pulls in a video-processor
+    # sub-component that hard-requires torchvision, even for image-only use.
+    "torchvision>=0.17",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "nbformat>=5.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
