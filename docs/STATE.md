@@ -1,6 +1,6 @@
 # STATE.md — Current State
 
-**Last updated:** 2026-08-11
+**Last updated:** 2026-08-11 (PR #1 merge recorded)
 
 This file must always reflect the latest state. Agents must always read this file before starting work in this repository ([[CLAUDE]] / [[AGENTS]]).
 
@@ -24,7 +24,7 @@ This file must always reflect the latest state. Agents must always read this fil
   - Fix: both notebooks now pin `GIT_REF = "worktree-phase1-env-dataset"` (the PR branch) for the clone/checkout, with a `TODO` to reset to `""` once PR #1 merges to the default branch.
   - Fix: `01_dataset.ipynb` now has its own self-contained Colab-detection + repo-clone + install cells (mirroring `00_environment.ipynb`'s), so it no longer depends on another notebook having run first in the same runtime.
   - Both fixes re-verified locally only (`IN_COLAB=False` branch unaffected; the `IN_COLAB=True` branch cannot be exercised outside real Colab) — full pytest (18 passed/1 skipped), notebook structural validation, and test-split blindness all still pass after these changes.
-- **PR:** [#1](https://github.com/Mr-Kondo/finetuning_vlm/pull/1) (draft, open), branch `worktree-phase1-env-dataset`. Should not merge until Colab validation lands.
+- **PR:** [#1](https://github.com/Mr-Kondo/finetuning_vlm/pull/1) **MERGED** into `main` at 2026-08-11T09:08:40Z (merge commit `72dd7b7`). **Note — process deviation:** this merge happened before real Colab GPU validation completed (the only Colab execution evidence so far, `df0d94b`, was a session connected to a local runtime, not the hosted GPU VM — see above). `docs/IMPLEMENTATION_PLAN.md`'s intended flow has Colab validation precede merge; that order was not followed here. Recorded factually, not backfilled as if validation had passed. Code (`src/vlm_lab/`, `notebooks/`, `tests/`, `scripts/`, `pyproject.toml`) now lives on `main` directly — there is no longer a separate feature branch carrying unmerged Phase 1 work.
 - **Pipeline completion vs. model performance:** not yet applicable — Phase 1 has no model-performance dimension (see [[EXPERIMENT_SPEC]] §8a/§8b). Nothing in this phase's scope contributes to that determination.
 
 ## Phase List and Progress
@@ -41,9 +41,9 @@ This file must always reflect the latest state. Agents must always read this fil
 
 ## Next Actions
 
-1. **User re-runs Colab validation** on the fixed notebooks: `notebooks/00_environment.ipynb` then `notebooks/01_dataset.ipynb`, each **Restart & Run All**, on a fresh runtime (or after pulling the latest commit on branch `worktree-phase1-env-dataset`), with **no manual git/pip intervention** — the whole point of this fix pass is that manual intervention should no longer be necessary. Report back whether it now completes end-to-end, and the actual CUDA/GPU/split-size output.
-2. Once Colab validation lands, update this file with the actual results (COLAB PASS/FAIL, real GPU identity, real CUDA version).
-3. Once PR #1 merges, reset `GIT_REF = ""` in both notebooks' Colab-setup cells (currently pinned to the PR branch since the default branch doesn't have this work yet).
+1. **User runs real Colab GPU validation** on `main`'s notebooks: `notebooks/00_environment.ipynb` then `notebooks/01_dataset.ipynb`, each **Restart & Run All**, on a Colab runtime with `Runtime → Change runtime type → GPU` selected (not "Connect to a local runtime" — the one Colab attempt so far used a local runtime and so did not exercise real GPU/CUDA behavior). Report back whether it completes end-to-end, and the actual CUDA/GPU/split-size output.
+2. Once real Colab GPU validation lands, update this file with the actual results (COLAB PASS/FAIL, real GPU identity, real CUDA version).
+3. **Now actionable since PR #1 merged:** reset `GIT_REF = ""` in both notebooks' Colab-setup cells (currently still pinned to `"worktree-phase1-env-dataset"`, a branch reference that will eventually be stale/deleted, even though `main` now has this work directly and a plain clone would work).
 4. Before Phase 1 as a whole (per `IMPLEMENTATION_PLAN.md`) can be declared complete and Phase 2 can start, the remaining open Phase 1 exit conditions below must still be completed — they were not part of this session's task scope.
 
 ## Unresolved Open Items (Blocking / Open)
@@ -76,3 +76,4 @@ See [[EXPERIMENT_SPEC]] §10. The following remain open and were **not** address
 | 2026-08-11 | **User attempted real Colab execution; it did not complete end-to-end as checked in** — required manual `git pull origin <branch>` (plain clone got `main`, which lacks this work since PR #1 hasn't merged) and a manual package install for `01_dataset.ipynb` (which had no setup cell of its own). Fixed: both notebooks now pin `GIT_REF` to the PR branch for clone/checkout (with a TODO to reset once merged), and `01_dataset.ipynb` now has its own self-contained Colab-detection + clone + install cells, independent of `00_environment.ipynb` having run first. Re-verified locally (pytest, notebook structural validation, test-blindness); **not yet re-verified on actual Colab** — Colab validation remains open until the user confirms the fixed notebooks run end-to-end with no manual steps. |
 | 2026-08-11 | The user separately ran both notebooks via Colab's "Save a copy in GitHub" feature, which auto-committed directly to the PR branch (`df0d94b "Created using Colab"`). That run's own outputs showed `Running on Google Colab: False` and the same local `/Volumes/SSD/...` path as this Mac — i.e. that Colab session was connected to a local runtime, not the hosted GPU VM, so it is not GPU validation evidence. Merged that commit into the branch (preserved in history), keeping this session's principled fix over the manual workaround cells the user had added to route around the missing-setup-cell problem. Re-verified after merge: pytest 18 passed/1 skipped, both notebooks structurally valid, test-split blindness intact. Colab GPU validation (real hosted runtime, `Runtime → Change runtime type → GPU`) is still outstanding. |
 | 2026-08-11 | At the user's request, synced `docs/` (not code/notebooks, which remain on the still-unmerged PR #1 pending real Colab GPU validation) directly to `main`, per ADR-005's exemption for minor documentation-only changes from the full review gate. |
+| 2026-08-11 | **PR #1 merged into `main`** (merge commit `72dd7b7`, 2026-08-11T09:08:40Z). This happened before real Colab GPU validation completed — a deviation from `IMPLEMENTATION_PLAN.md`'s intended validate-then-merge order, recorded here factually rather than silently normalized. Code now lives on `main` directly; this file updated accordingly at the user's request. |
