@@ -32,7 +32,7 @@ on the held-out test split, compared to the base model before fine-tuning (zero/
 ## 3. Dataset
 
 - **HF repo ID:** `naver-clova-ix/cord-v2`
-- **Confirmed structure (2026-08-10, HF Hub, config name: `cord-v2`; selected as the default config in the HF Hub UI):**
+- **Confirmed structure (2026-08-10, HF Hub, config name: `"default"`, verified directly against the HF Dataset Viewer API's `/splits` and `/size` endpoints on 2026-08-11 — the dataset has no `configs:` block in its README frontmatter and no per-config file layout, so `datasets.load_dataset("naver-clova-ix/cord-v2", ...)` resolves the single config automatically with no `name=` argument needed; this corrects an earlier, unverified assumption in `reviews/phase_0_adversarial.md` §7 that the config name was literally `cord-v2`):**
 
   | split | rows | columns |
   |---|---:|---|
