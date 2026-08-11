@@ -10,7 +10,11 @@ by whichever task authors each notebook.
 Checks performed per notebook:
 
 1. The file parses as valid JSON and conforms to the nbformat schema
-   (via ``nbformat.read`` + ``nbformat.validate``).
+   (via ``nbformat.read`` + ``nbformat.validate``, with
+   ``relax_add_props=True`` so a kernel-added extra field -- e.g. Google
+   Colab's kernel adding a ``metadata`` key to stream outputs -- doesn't
+   fail validation on its own; missing/misshapen *required* structure
+   still does).
 2. No code cell has non-empty ``outputs`` while its ``execution_count``
    is null/missing. A code cell with real outputs should also carry the
    execution count that produced them; outputs without an execution
@@ -73,7 +77,12 @@ def validate_notebook(path: Path) -> list[str]:
         return errors
 
     try:
-        nbformat.validate(notebook)
+        # relax_add_props=True: some kernels (observed: Google Colab's) add extra,
+        # harmless fields to cell outputs -- e.g. a stream output's `metadata`
+        # key, which strict nbformat v4 does not define for that output type.
+        # Reject unknown *required* structure, but don't fail a real, executed
+        # notebook over an extra field a legitimate kernel added.
+        nbformat.validate(notebook, relax_add_props=True)
     except nbformat.ValidationError as exc:
         errors.append(f"failed nbformat schema validation: {exc}")
 
