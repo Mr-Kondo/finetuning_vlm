@@ -1,5 +1,22 @@
 # Phase 1 Closure and Phase 2 Pre-Registration — PROPOSAL (DRAFT)
 
+> ## ⛔ REVIEW STATUS: **BLOCKED** — ADR-005 gate NOT satisfied
+>
+> The ADR-005 adversarial review of this document was completed on 2026-08-12 and returned
+> **BLOCK**: 25 findings (17 `required`), all dispositioned **ACCEPT**, plus four
+> `USER DECISION REQUIRED` items. See **`reviews/phase_2_adversarial.md`** for the findings and
+> their dispositions.
+>
+> **Two of this document's own claims were found to be wrong** and are corrected inline below,
+> marked `[CORRECTED — F<n>]`:
+> - §8.1's claim that a train↔test duplicate "inflates both conditions, not one" (F3) — it does not;
+>   the Fine-tuned condition trained on it and the Base condition did not.
+> - §5.1's use of optimizer-state memory to dismiss few-shot (F23) — inference retains no optimizer.
+>
+> Sections that remain **unrevised pending user decisions D-3 (duplicate policy) and D-4 (evaluation
+> estimand / primary metric)** are §6 and §8.1; those decisions reshape them, so they are left as the
+> reviewed text rather than pre-emptively rewritten. Do not read them as accepted.
+
 > **THIS DOCUMENT IS NOT AUTHORITATIVE.**
 > It is a *proposal* drafted by Claude Code to close the remaining Phase 1 exit conditions
 > in `docs/IMPLEMENTATION_PLAN.md` and to complete the ADR-009 pre-registration that must be
@@ -120,12 +137,20 @@ model.visual.merger.{linear_fc1,linear_fc2,norm}
 model.visual.deepstack_merger_list.{0..2}.{linear_fc1,linear_fc2,norm}
 ```
 
-**Material observation:** the vision tower uses a *fused* `attn.qkv` and `mlp.linear_fc1/fc2`, and
-shares **no** module basename with the language tower. The specific failure ADR-012 was written to
-prevent (a suffix like `q_proj` silently matching vision-side layers) therefore cannot occur for
-`q_proj/k_proj/v_proj/o_proj/gate_proj/up_proj/down_proj` on this model. We still specify
-fully-qualified targeting, because the gate requires it and because relying on that coincidence is
-exactly the kind of hidden assumption the gate exists to catch.
+**Material observation:** the vision tower uses a *fused* `attn.qkv` and `mlp.linear_fc1/fc2`, so
+**none of the seven projection basenames selected in §3.2**
+(`q_proj/k_proj/v_proj/o_proj/gate_proj/up_proj/down_proj`) occurs anywhere in the vision tower. The
+specific failure ADR-012 was written to prevent — a suffix like `q_proj` silently matching a
+vision-side layer — therefore cannot occur on this model. We still specify fully-qualified targeting,
+because the gate requires it and because relying on that coincidence is exactly the kind of hidden
+assumption the gate exists to catch.
+
+> **[CORRECTED — F19]** An earlier version of this paragraph claimed the towers share *no* module
+> basename at all, which is too broad: both towers contain modules named `norm`. The narrow claim
+> above (about the seven selected projection basenames) is the one the evidence supports.
+> Likewise, "no separate `lm_head`" in the listing above is imprecise: Qwen3-VL *does* have an
+> `lm_head` module — its **weight** is tied to `embed_tokens`, which is why no separate
+> `lm_head.weight` tensor appears in the checkpoint.
 
 ### 3.2 Proposal (P-3): target tower and modules
 
@@ -221,10 +246,31 @@ Fine-tuned context lengths depend on incoming image size in an unbounded way.
 **Proposal (P-7):**
 
 ```yaml
-image_max_pixels: 1_048_576    # <= 1024 image tokens
-image_min_pixels:   200_704    # >=  196 image tokens (guards against over-shrinking small receipts)
-max_seq_len: 2048              # image tokens + prompt + target
+# Mapped onto the pinned processor's ACTUAL parameter names, which take TOTAL PIXEL COUNTS,
+# not edge lengths. The real Colab run's processor dump shows the shipped defaults as
+# size: {"longest_edge": 16777216, "shortest_edge": 65536}.
+processor_size:
+  longest_edge:  1_048_576     # <= 1024 image tokens
+  shortest_edge:   200_704     # >=  196 image tokens (guards against over-shrinking small receipts)
+max_seq_len: TBD               # [CORRECTED - F2] see below; must NOT be fixed independently
 ```
+
+> **[CORRECTED — F2]** The earlier draft fixed `max_seq_len: 2048` here and `max_new_tokens: 768` in
+> §5.3 independently of each other. Those are inconsistent: 1,024 image tokens + 768 generated tokens
+> leaves only 256 for the system prompt, user prompt, image boundary tokens and chat-template tokens.
+> Training could then silently drop target suffixes and EOS, and evaluation could cut a correct JSON
+> object before its closing brace and score it zero — a harness-manufactured *non*-improvement.
+>
+> The image, prompt, target and total budgets must therefore be derived **jointly** from the fully
+> rendered train+validation corpus, with these as hard assertions: zero training-target truncations,
+> EOS preserved on every target, zero silent input truncations, and the generation termination reason
+> recorded per sample. Reaching `max_new_tokens` at test time is *model behaviour*, not an execution
+> defect, and must never justify a rerun with a larger cap (F6).
+
+> **[CORRECTED — F18]** The 1,093 and 1,599 figures in the table above are raw pixel-area divisions.
+> The processor rounds both dimensions up to multiples of `patch_size × merge_size = 32`, so the real
+> counts are approximately 1,080 and 1,610. All distribution figures and the VRAM gate must use the
+> pinned processor's actual `image_grid_thw` output, not this arithmetic.
 
 Both conditions use identical values (ADR-006). `1,048,576` keeps typical CORD receipts at close to
 native resolution (a 864×1296 receipt is barely downscaled) while bounding the visual context at
@@ -246,11 +292,21 @@ applied identically to both conditions, with the change recorded before any perf
 **Zero-shot for both Base and Fine-tuned.** No in-context demos.
 
 Rationale: a few-shot demo for this task requires a *demo image*, which costs another ~1024 image
-tokens per demo. Two demos would roughly triple the visual context and the VRAM, on the same T4 that
-must also hold the 4-bit model, activations and optimizer state. The trade-off is real and it is
-adverse: few-shot would most plausibly force `image_max_pixels` down for both conditions, degrading
-OCR fidelity for both. Zero-shot also removes the ADR-009 requirement to pre-register a demo-ID list
-and a demo-selection procedure, and removes a class of Base/Fine-tuned asymmetry risk.
+tokens per demo. Two demos would roughly triple the visual context, ~~and the VRAM, on the same T4
+that must also hold the 4-bit model, activations and optimizer state~~. Zero-shot also removes the
+ADR-009 requirement to pre-register a demo-ID list and a demo-selection procedure, and removes a
+class of Base/Fine-tuned asymmetry risk.
+
+> **[CORRECTED — F23]** The struck-through clause was wrong: evaluation-time inference retains no
+> optimizer state, so citing it to rule out few-shot conflated training-time and inference-time
+> memory. Few-shot may still be infeasible on account of image-context and KV-cache memory, but that
+> is now a **hypothesis to be measured** in the evaluation arm of the ADR-014 gate (§8.2, F21), not an
+> established fact.
+>
+> Consequently the estimand must be stated narrowly: this experiment measures **the adapter effect
+> under the frozen zero-shot prompt**, not a general Base-versus-Fine-tuned comparison. A caveat in
+> the Phase 6 report does not repair an over-broad claim (F23) — the claim itself is scoped here,
+> before any result exists.
 
 Acknowledged cost: zero-shot understates the Base model's achievable performance, which biases the
 comparison *in favour of* the fine-tuned model. This is a known limitation and must be stated in the
@@ -342,7 +398,15 @@ Use `JSONParseEvaluator` from the official Donut repository
 (`https://github.com/clovaai/donut`, `donut/util.py`), **vendored into
 `src/vlm_lab/third_party/donut_eval.py` at a pinned commit SHA**, rather than a re-implementation.
 `EVALUATION_PROTOCOL.md` §5.1 explicitly permits this and requires that any custom implementation
-document its differences — vendoring at a pin means there are no differences to document.
+document its differences — ~~vendoring at a pin means there are no differences to document.~~
+
+> **[CORRECTED — F11]** That last clause is false. §6.3 wraps the vendored evaluator in our own
+> pre-normalization, JSON extraction, invalid-output and missing/null rules, which makes the whole
+> thing a custom pipeline whose differences *do* have to be documented. The dependency list was also
+> incomplete: official `donut/util.py` imports `nltk.edit_distance` directly, not only `zss`. Both
+> must be pinned with exact `==` versions, only the required evaluator code is vendored (with its
+> license), and regression fixtures with known scores must be frozen so a dependency drift cannot
+> silently change the metric.
 
 Requirements attached to this proposal:
 
@@ -372,7 +436,18 @@ These are *not* covered by Donut's evaluator and must be pinned by us:
 | Missing vs. null | A key that is absent and a key present with value `null` are treated as identical (both = absent) on both sides. |
 | Empty prediction (`{}`) | Valid JSON; scores whatever the evaluator gives (near 0), counted as valid in the JSON validity rate. |
 | F1 aggregation level | Global micro-F1 over flattened field–value pairs accumulated across all samples (Donut's own definition, per `EVALUATION_PROTOCOL.md` §5.1). Reported as such, explicitly, in `report.md`. |
-| Per-sample score for the paired bootstrap | TED-Acc is per-sample by construction, so `Δ_i` is well defined. Field-level F1 is **not** per-sample under micro aggregation and therefore **cannot** be the bootstrap statistic; it is reported as a point estimate only. This is why TED-Acc, not F1, is the primary metric. |
+| Per-sample score for the paired bootstrap | TED-Acc is per-sample by construction, so `Δ_i` is well defined. Field-level micro-F1 has no additive per-sample score, so it is **incompatible with the proposed `mean(Δ_i)` construction** — ~~and therefore cannot be the bootstrap statistic~~. See the correction below. |
+
+> **[CORRECTED — F12]** Saying micro-F1 "cannot" be bootstrapped was wrong. A paired receipt-level
+> *cluster* bootstrap can resample receipts and recompute the corpus-level micro-F1 for both
+> conditions within each replicate. The accurate statement is that micro-F1 is incompatible with the
+> specific mean-of-per-receipt-differences construction proposed in §6.4, not that a CI for it is
+> impossible. If micro-F1 is retained as a secondary metric, a cluster-bootstrap CI should be
+> provided.
+>
+> This also weakens one of the reasons given for preferring TED-Acc over F1, and therefore feeds the
+> `USER DECISION REQUIRED` item **D-4** (evaluation estimand and primary metric) — see F8/F9 in
+> `reviews/phase_2_adversarial.md`.
 
 ### 6.4 Proposal (P-14): paired bootstrap configuration
 
@@ -409,11 +484,17 @@ set, where `Δ = TED-Acc(Fine-tuned) − TED-Acc(Base)` per receipt. **X has nev
 Per `AGENTS.md` §17, an acceptance-threshold choice is explicitly a `USER DECISION REQUIRED` item;
 Claude Code must not set it unilaterally. Options:
 
-| Option | Meaning | Comment |
+> **[CORRECTED — F16]** The earlier version of this table justified each option partly by how likely
+> it was to pass ("almost certain to pass", "typically moves schema-adherence a long way"). Those were
+> unsupported predictions, and forecasting the result is precisely the wrong basis for choosing a
+> pre-registered threshold. X must be chosen from what a given delta *means* for this task. The
+> commentary below is restated on that basis only.
+
+| Option | Meaning | What it commits the conclusion to |
 |---|---|---|
-| `X = 0.00` | Any statistically significant improvement counts | Weakest claim; almost certain to pass if fine-tuning works at all, so it tests very little |
-| **`X = 0.05` (recommended)** | The 95% CI lower bound must clear +5 TED-Acc points | Substantive but attainable; a real QLoRA run on CORD typically moves schema-adherence a long way from a zero-shot base |
-| `X = 0.10` | CI lower bound must clear +10 points | Strong claim; risks declaring "no improvement" for a genuinely working pipeline given `n = 100` |
+| `X = 0.00` | Any improvement whose 95% CI excludes zero counts | Claims only "the adapter helped, direction-wise"; makes no claim about the size of the effect |
+| **`X = 0.05` (recommended default)** | The CI lower bound must clear +5 points of the primary metric | Claims a difference large enough to be worth the fine-tuning cost, while staying resolvable at `n = 100` |
+| `X = 0.10` | CI lower bound must clear +10 points | Claims a large effect; with `n = 100` the CI width alone may prevent a real, moderate improvement from being declared |
 
 Whichever is chosen is frozen here and **may not be revisited after any result is seen**
 (`EVALUATION_PROTOCOL.md` §6).
@@ -467,13 +548,33 @@ Implement in `src/vlm_lab/data.py` + a thin notebook/script caller:
 - **Test-blindness compliance:** the audit outputs **counts and hashes only** — no test images, no
   test ground-truth content, no per-sample test rendering (ADR-008).
 
-**Handling policy proposal:** *report only* for this experiment; do not re-split and do not exclude
+**Handling policy proposal:** ~~*report only* for this experiment; do not re-split and do not exclude
 rows. Re-splitting would break the `train=800 / validation=100 / test=100` structure that ADR-007
 fixes and that both conditions share; and since Base and Fine-tuned are compared *pairwise on the
 same test rows*, a duplicate inflates both conditions, not one. If the audit finds exact
 train↔test image duplicates, the count is reported in `report.md` as a stated caveat on
 generalization, and the finding is escalated as a new `USER DECISION REQUIRED` item rather than
-handled silently.
+handled silently.~~
+
+> **[CORRECTED — F3] The struck-through paragraph above is wrong and is retained only so the error
+> is traceable.** The reasoning fails at its core: the Fine-tuned condition has *trained* on a
+> train↔test duplicate while the Base condition has not, so a memorized duplicate raises the
+> Fine-tuned score selectively and manufactures a positive Δ that is leakage, not generalization.
+> Pairing the predictions on the same test row does not remove that training exposure. Deferring the
+> policy until the duplicate count is known also violates ADR-008, which requires the handling policy
+> to be pre-registered *before* the audit runs.
+>
+> The replacement policy is **`USER DECISION REQUIRED` (D-3)** — see
+> `reviews/phase_2_adversarial.md`. It must be frozen before the audit executes, must specify
+> deterministic actions for exact *and* near duplicates (exclusion, group-aware split construction,
+> or halting/downgrading the confirmatory claim), and must also cover validation↔test duplication
+> (F4) and its consequence for the bootstrap's independence assumption (F13). Any departure from
+> ADR-007's official split requires its own ADR.
+>
+> Two further corrections from F4 apply to the audit design above: the audit must publish
+> **aggregate counts and a frozen verdict only** — no hashes or pair IDs, since a test-side hash can
+> be joined against an already-viewed train image to reveal test content — and the exact-pixel hash
+> must include image dimensions and mode.
 
 ### 8.2 Proposal (P-20): ADR-014 production-shape VRAM go/no-go gate
 
@@ -580,6 +681,22 @@ it exists.
 | P-20 | ADR-014 gate notebook and GO criterion | Claude proposal |
 | — | **Colab tier for Phase 3–5** | **USER DECISION REQUIRED** |
 
-**Gate status:** ADR-005 adversarial review of this proposal — **PENDING**.
-This document must not be promoted into the source-of-truth docs before that review is run,
-its findings are persisted under `reviews/`, and each material finding is dispositioned.
+### Escalated to the user
+
+| ID | Decision | Origin |
+|---|---|---|
+| **D-1** | Improvement threshold X | Pre-existing (`EXPERIMENT_SPEC.md` §8b), refined by F16 |
+| **D-2** | Colab tier for Phase 3–5 | Pre-existing (`EXPERIMENT_SPEC.md` §10) |
+| **D-3** | Duplicate-handling policy, frozen *before* the audit runs | **New** — review findings F3 / F4 / F13 |
+| **D-4** | Evaluation estimand and primary metric (verbatim transcription vs. semantic extraction) | **New** — review findings F8 / F9 / F12 |
+
+---
+
+**Gate status:** ADR-005 adversarial review of this proposal — **COMPLETE, verdict BLOCK**
+(2026-08-12). 25 findings, 17 `required`, all dispositioned ACCEPT. See
+`reviews/phase_2_adversarial.md`.
+
+This document must not be promoted into the source-of-truth docs, and
+`notebooks/02_baseline.ipynb` must not be executed, until the `required` findings are resolved,
+the duplicate-handling policy is frozen ahead of the audit, the pre-registration is complete, and
+D-1 through D-4 are decided by the user.

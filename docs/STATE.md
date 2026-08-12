@@ -1,12 +1,12 @@
 # STATE.md — Current State
 
-**Last updated:** 2026-08-11 (PR #1 merge recorded)
+**Last updated:** 2026-08-12 (Phase 2 entry gate reviewed — verdict BLOCK)
 
 This file must always reflect the latest state. Agents must always read this file before starting work in this repository ([[CLAUDE]] / [[AGENTS]]).
 
 ## Current Phase
 
-**Phase 1: Environment Setup + Data Preparation — This session's sub-scope is COMPLETE: implementation delivered, locally validated, independently reviewed, and now confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks. Additional Phase 1 exit conditions (per `IMPLEMENTATION_PLAN.md`, not part of this session's scope) remain OPEN (see below) — Phase 1 as a whole is not yet complete.**
+**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: the additional exit conditions in `IMPLEMENTATION_PLAN.md` remain OPEN, and the Phase 2 entry gate was run on 2026-08-12 and returned BLOCK — see "Phase 2 Entry Gate" below.**
 
 - Phase 0 is complete. The user approved the Phase 0 → Phase 1 transition explicitly; the ADR-005 adversarial-review gate for this transition was already satisfied by `reviews/phase_0_adversarial.md` (no new adversarial review was required to start Phase 1 — see that review and `reviews/phase_1_code_review.md` for the record).
 - This session's Phase 1 task was explicitly scoped to: repository/environment bootstrap, `notebooks/00_environment.ipynb`, `notebooks/01_dataset.ipynb`, `src/vlm_lab/data.py`, and local tests. It did **not** cover every exit condition listed in `IMPLEMENTATION_PLAN.md`'s Phase 1 section — see "Unresolved Open Items" below for what remains.
@@ -45,17 +45,82 @@ This file must always reflect the latest state. Agents must always read this fil
 |---|---|---|
 | 0 | Design specification drafting | Complete |
 | 1 | Environment setup + data preparation | This session's sub-scope COMPLETE (implemented, locally validated, Colab GPU validated); additional `IMPLEMENTATION_PLAN.md` exit conditions still open (see below) — Phase 1 as a whole not yet complete |
-| 2 | Baseline evaluation | Not started |
+| 2 | Baseline evaluation | **Not started — entry gate run 2026-08-12, verdict BLOCK** (ADR-005; `reviews/phase_2_adversarial.md`). Held on 4 user decisions D-1…D-4 and 17 `required` findings |
 | 3 | QLoRA smoke test | Not started |
 | 4 | Full QLoRA training | Not started |
 | 5 | Evaluation (Base vs Fine-tuned) | Not started |
 | 6 | Report / retrospective | Not started |
 
+## Phase 2 Entry Gate (ADR-005) — **BLOCK**
+
+The user asked to proceed to Phase 2 on 2026-08-12. Phase 2 is gated, and the gate has now been run
+and **failed**. Status:
+
+- **Gate:** ADR-005 adversarial review for Phase 2 entry. **Reviewed. Verdict: BLOCK — NOT SATISFIED.**
+- **Evidence:** `reviews/phase_2_adversarial.md` (Codex/Sol role, read-only, independent context, via
+  the `codex:rescue` skill; reviewed commit `f179dbd`).
+- **Reviewed artifact:** `docs/proposals/phase1_closure_prereg.md` — a Claude-Code-authored draft
+  closing the remaining Phase 1 exit conditions and completing the ADR-009 pre-registration. **Draft
+  only; NOT authoritative and NOT promoted** into `EXPERIMENT_SPEC` / `EVALUATION_PROTOCOL` /
+  `DECISIONS`.
+- **Findings:** 25 (17 `required`, 7 `recommended`, 1 `optional`). **All 25 dispositioned ACCEPT**;
+  no REJECT, no DEFER. Two were errors in Claude Code's own reasoning and are corrected inline in the
+  proposal (marked `[CORRECTED — F3]` and `[CORRECTED — F23]`).
+- **Why this matters procedurally:** `EXPERIMENT_SPEC.md` §8b puts the pre-registration deadline
+  *before any performance output is observed in Phase 2* — including baseline output on a
+  train/validation subset. Running `notebooks/02_baseline.ipynb` even once before promotion would
+  breach it. Phase 2 execution is therefore held.
+
+Facts newly established from the live Hub (read directly, not recalled), usable regardless of how the
+open decisions land:
+
+- ADR-015 revision SHAs: model `Qwen/Qwen3-VL-4B-Instruct` = `ebb281ec70b05090aa6165b016eac8ec08e71b17`;
+  dataset `naver-clova-ix/cord-v2` = `7f0115a4b758a71d6473b8d085751692da2fef98`.
+- ADR-012 real module structure: language tower
+  `model.language_model.layers.{0..35}.{self_attn.q|k|v|o_proj, mlp.gate|up|down_proj}`; vision tower
+  uses fused `attn.qkv` + `mlp.linear_fc1/fc2`, so none of the seven selected projection basenames
+  occurs on the vision side. Output-head weight is tied to `embed_tokens`.
+- Adapter parameter count at r=16 over those seven projections: **33,030,144** (57,344 × 36 × 16).
+- **New real constraint, not previously recorded anywhere in `docs/`:** the model is distributed in
+  bfloat16, but **Tesla T4 (sm_75) has no bf16 support**. The compute/load dtype must be fp16, with
+  the fp16 grad-scaler path verified. This sits alongside ADR-014's existing note that T4 rules out
+  FlashAttention-2.
+
 ## Next Actions
 
-1. **This session's Phase 1 sub-scope is done** — no further action needed on `notebooks/00_environment.ipynb` / `notebooks/01_dataset.ipynb` / `src/vlm_lab/data.py` / `tests/`.
-2. Reset `GIT_REF = ""` is already done in both notebooks (main has this work directly since PR #1 merged) — no lingering branch-pin cleanup needed.
-3. Before Phase 1 as a whole (per `IMPLEMENTATION_PLAN.md`) can be declared complete and Phase 2 can start, the remaining open Phase 1 exit conditions below must still be completed — they were not part of this session's task scope. Recommend a new, explicitly-scoped session/task for each (e.g. the LoRA approval gate and VRAM go/no-go gate both require live model/GPU access and are natural next candidates).
+1. **Blocked on the user — four decisions (D-1…D-4).** See "USER DECISION REQUIRED" below. D-3 and
+   D-4 in particular reshape the proposal, so revising it before they are answered would be wasted
+   work.
+2. After D-1…D-4: resolve the 17 `required` findings, re-run the ADR-005 adversarial review against
+   the revised proposal, then promote the accepted content into `EXPERIMENT_SPEC` /
+   `EVALUATION_PROTOCOL` / `IMPLEMENTATION_PLAN` / new ADRs, create `configs/*.yaml`, and only then
+   start Phase 2.
+3. Independently of the above, these Phase 1 exit conditions still need implementation and (for the
+   GPU ones) a Colab run: the ADR-008 duplication audit, the ADR-014 production-shape VRAM gate
+   notebook, and a split-scoped loader so test-blindness is structurally enforced rather than left to
+   caller discipline (review finding F5).
+4. **This session's earlier Phase 1 sub-scope remains done** — no further action needed on
+   `notebooks/00_environment.ipynb` / `notebooks/01_dataset.ipynb` / `src/vlm_lab/data.py` /
+   `tests/`, other than F5's loader change above.
+
+## USER DECISION REQUIRED (blocking the Phase 2 gate)
+
+Per `AGENTS.md` §17 these are material trade-offs the orchestration layer must not resolve alone.
+
+- **D-1 — Improvement threshold X** (pre-existing; `EXPERIMENT_SPEC.md` §8b has never fixed it).
+  Options `0.00` / `0.05` (recommended) / `0.10`. Must be chosen from what a delta *means*, not from
+  how likely it is to pass (review finding F16).
+- **D-2 — Colab tier for Phase 3–5** (pre-existing). Determines the fp16-vs-bf16 pin, the SDPA
+  backend, the image-token budget, and the whole VRAM gate — so it must be decided *before* the
+  ADR-014 gate is run, or the gate measures the wrong machine.
+- **D-3 — Duplicate-handling policy, frozen *before* the audit runs** (new; findings F3/F4/F13).
+  ADR-008 requires the policy to be pre-registered ahead of the audit. Options: deterministic
+  exclusion, group-aware split construction, or halt/downgrade the confirmatory claim. Departing from
+  ADR-007's official split needs its own ADR.
+- **D-4 — Evaluation estimand and primary metric** (new; findings F8/F9/F12). Strict verbatim
+  transcription versus semantic extraction. This single choice determines the primary metric, the
+  string-normalization rules, and the prompt wording. Best decided after the synthetic-error metric
+  probe (F8), which needs no model output and no test data.
 
 ## Unresolved Open Items (Blocking / Open)
 
@@ -95,3 +160,4 @@ See [[EXPERIMENT_SPEC]] §10. The following remain open and were **not** address
 | 2026-08-12 | User ran the above guard on Colab and it fired: `RuntimeError: ['PIL'] already imported...`, at the very start of the cell, before any of the notebook's own code had run. This proved the guard's design assumption wrong — Colab's own kernel startup imports PIL before user code runs at all, so a blanket "fail if already imported" check would fire on *every* run, including genuinely fresh ones, making the guard useless (it could never actually pass). Redesigned (commit `a377d5b`, pushed directly to `main`): both setup cells now parse `pyproject.toml`'s exact `==` pins directly (via `tomllib`, avoiding version-string duplication), run the pip install as before (already confirmed correct via the earlier log), and only *then* compare the already-imported `sys.modules` versions against the parsed pins. If they already match, proceed normally. If they don't — files on disk are now correct but this process's cached modules aren't — trigger a real interpreter restart via `os.kill(os.getpid(), 9)` (the standard Colab idiom for this exact situation) and instruct the user to run again; the clone/install steps are idempotent no-ops on that next pass. Verified: local execution still passes (though it can't exercise the Colab-only branch), and the Colab-only code was directly syntax-checked and its mismatch-detection logic unit-tested against simulated match/mismatch/local-version-suffix scenarios before pushing. Outstanding: one more real Colab run to confirm this self-healing sequence actually completes end-to-end. |
 | 2026-08-12 | User ran the self-heal fix. The Pillow/`_Ink` issue was resolved (no recurrence) — but a new, different, real error appeared further down the same import chain: `RuntimeError: Detected that PyTorch and TorchAudio were compiled with different CUDA versions. PyTorch has CUDA version 13.0 whereas TorchAudio has CUDA version 12.8`, raised inside `transformers.audio_utils` while `AutoProcessor.from_pretrained` probed for optional audio support. User also asked whether to change dependency versions and switch to Python 3.13. Diagnosed directly instead of guessing: `torchaudio` is not a dependency of this project at all — confirmed via `transformers`' own package metadata, it's only an optional "audio"/"all"/"dev" extra, so the plain `transformers==5.15.0` pin never installs or touches it; it's whatever Colab's base VM image ships by default, compiled against that image's own CUDA version, which no longer matches once the pinned `torch` build resolves to CUDA 13.0. Confirmed locally that `AutoProcessor` imports cleanly with torchaudio entirely absent (this project only ever processes receipt images, never audio). Declined the Python 3.13 suggestion with rationale: this bug is a compiled-CUDA-extension version mismatch between two specific packages, unrelated to the Python interpreter version, and Colab's Python version isn't something togglable via `pyproject.toml` — switching would introduce substantial new risk (uncertain wheel availability for every pin under cp313/CUDA 13.0) to fix a problem with a much smaller, already-diagnosed root cause. Fixed (commit `b0b0004`, pushed directly to `main`): both setup cells now explicitly `pip uninstall -y torchaudio` right after the main install, rather than chasing a CUDA-matched torchaudio pin for a feature never used. Outstanding: one more real Colab run to confirm the full sequence (Pillow self-heal + torchaudio removal) completes end-to-end with a working processor load. |
 | 2026-08-12 | **`COLAB PASS` achieved for both notebooks** (commits `323f8a9`, `2f596bf`), verified directly by reading the committed notebook JSON rather than the summary alone. `00_environment.ipynb`: real Tesla T4, `cuda_available: True`, CUDA 13.0, model config and **processor both loaded successfully** with no errors — the full multi-round diagnostic sequence (branch pin → self-contained setup → Pillow/torchvision drift → editable-install `.pth` timing → `sys.modules` staleness → stray `torchaudio`) is resolved. `01_dataset.ipynb`: real split sizes, images, and test-blindness all confirmed on the same real GPU run. This closes out this session's Phase 1 sub-scope (implementation + local validation + independent review + Colab GPU validation) as fully complete. The broader Phase 1 exit conditions from `IMPLEMENTATION_PLAN.md` (LoRA approval gate, VRAM go/no-go gate, duplication audit, revision pinning, metric/prompt pre-registration) remain open and were never part of this session's scope — Phase 1 as a whole is not yet complete, and Phase 2 should not start until those are addressed in a future, explicitly-scoped session. |
+| 2026-08-12 | **User asked to proceed to Phase 2; the Phase 2 entry gate was run and returned BLOCK.** First re-verified Phase 1's status directly from the committed notebook JSON (`COLAB PASS` confirmed: `in_colab: True`, `cuda_available: True`, Tesla T4 14.56 GiB, Pillow 12.3.0 matching the pin, `Qwen3VLProcessor` loaded; `01_dataset.ipynb` full pass with test handled mechanically only). Established the facts that need no design judgement by reading the live Hub rather than recalling them: ADR-015 commit SHAs for model and dataset; ADR-012's real fully-qualified module names from `model.safetensors.index.json` (vision tower uses fused `attn.qkv`, so none of the seven selected projection basenames collides); the r=16 adapter parameter count 33,030,144; and a previously unrecorded hard constraint — the model ships bfloat16 but T4 (sm_75) has no bf16 support, so fp16 must be pinned. Drafted `docs/proposals/phase1_closure_prereg.md` covering all remaining Phase 1 exit conditions plus the ADR-009 pre-registration (commit `f179dbd`), then ran the mandatory ADR-005 adversarial review on it (Codex/Sol role, read-only, independent context). **Verdict: BLOCK.** 25 findings (17 `required`); **all 25 dispositioned ACCEPT, none rejected or deferred** — the review is technically sound throughout and caught two outright errors in Claude Code's own reasoning: the claim that a train↔test duplicate "inflates both conditions, not one" (false — only the Fine-tuned condition trained on it, so leakage shows up directly in Δ), and the use of optimizer-state memory to dismiss few-shot (inference retains no optimizer). Both are corrected inline in the proposal with the original text struck through so the error stays traceable. Review evidence persisted at `reviews/phase_2_adversarial.md`. Two new `USER DECISION REQUIRED` items were created by the review (D-3 duplicate-handling policy, which ADR-008 requires frozen *before* the audit runs; D-4 the evaluation estimand and primary metric), joining the two pre-existing ones (D-1 threshold X, D-2 Colab tier). Nothing was promoted into the source-of-truth documents and `02_baseline.ipynb` was not executed — doing so would breach `EXPERIMENT_SPEC.md` §8b's pre-registration deadline. Phase 2 remains not started. |
