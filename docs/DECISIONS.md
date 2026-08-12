@@ -339,3 +339,104 @@ The user prioritized conserving the GPU budget and chose to adopt single-seed tr
 **Consequences:**
 - This item is removed from the open items in `docs/STATE.md`, and the Phase 4 training design assumes a single seed.
 - If GPU budget allows in the future, retraining with additional seeds can be proposed as a new ADR (this ADR does not foreclose that option).
+
+---
+
+## ADR-017: Fix the Improvement Threshold X at 0.05
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Trigger:** `reviews/phase_2_adversarial.md` Finding 16 (Codex adversarial review, Phase 2 entry gate). USER DECISION REQUIRED → decided by the user.
+
+**Context:**
+`EXPERIMENT_SPEC.md` §8b defines "improvement achieved" as `CI_lower(Δ) ≥ X` on the held-out test set, but X had never been fixed — it was an open item from Phase 0 onward. ADR-009 requires it to be pre-registered before any Phase 2 performance output is observed. The adversarial review additionally found that the draft proposal justified candidate values partly by how likely each was to pass ("almost certain to pass"), which is the wrong basis for a pre-registered threshold: X must be chosen from what a given delta *means* for this task, not from a forecast of the result.
+
+**Decision:**
+`X = 0.05`. Improvement is declared only when the lower bound of the 95% paired-bootstrap confidence interval of Δ (the per-receipt difference in the primary metric, Fine-tuned − Base) reaches +0.05. This commits the conclusion to a difference large enough to be worth the fine-tuning cost, while remaining resolvable at `n = 100`. Per `EVALUATION_PROTOCOL.md` §6 this value may not be revisited after any result is seen.
+
+**Alternatives Considered:**
+- `X = 0.00` (improvement whenever the CI excludes zero): claims only a direction, makes no claim about effect size; not adopted.
+- `X = 0.10`: a stronger claim, but at `n = 100` the CI width alone could prevent a real, moderate improvement from being declared; not adopted.
+
+**Consequences:**
+- `EXPERIMENT_SPEC.md` §8b and §10 and `EVALUATION_PROTOCOL.md` §6 must record X = 0.05 when the Phase 2 pre-registration is promoted.
+- The threshold is expressed in units of the primary metric fixed by ADR-020.
+
+---
+
+## ADR-018: Run the ADR-014 VRAM Gate on the Free-Tier T4 First, Then Decide the Tier
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Trigger:** `reviews/phase_2_adversarial.md` Findings 20 and 21 (Codex adversarial review, Phase 2 entry gate). USER DECISION REQUIRED → decided by the user.
+
+**Context:**
+`EXPERIMENT_SPEC.md` §10 lists the Colab tier as an open item. It is not a scheduling detail: the tier determines the compute dtype (Tesla T4 is Turing/sm_75 and has **no bfloat16 support**, while the model is distributed in bfloat16), the attention backend (T4 also rules out the standard FlashAttention-2 kernels, per ADR-014), the image-token budget, and every number the VRAM go/no-go gate produces. The bf16 constraint was confirmed during the Phase 2 gate review and was not previously recorded anywhere in `docs/`.
+
+**Decision:**
+Run the ADR-014 production-shape VRAM go/no-go gate on the free-tier T4 first, and decide the tier from that measurement. If the gate returns NO-GO, the documented fallback ladder for image resolution is applied and the gate re-run; if it still returns NO-GO, an upgrade to an Ampere-or-newer tier (L4 / A100) is reconsidered as a new decision. Until and unless that happens, the experiment is pinned to the T4 path: `float16` compute **and** load dtype, and `attn_implementation="sdpa"`, applied identically to the Base and Fine-tuned conditions.
+
+**Alternatives Considered:**
+- Committing to the free T4 outright: rejected as premature — no production-shape memory measurement exists yet, so "it fits" would be an assumption.
+- Moving to Colab Pro (L4/A100) now: would unlock bf16 and remove the fp16 loss-scaling concern, but the user chose to establish the measurement first rather than pay for headroom that may not be needed.
+
+**Consequences:**
+- The compute/load dtype is an experimental condition. Changing tiers later changes the numerical path and therefore requires a new ADR, not a silent configuration edit.
+- The gate must measure the evaluation path (generation prefill and KV cache at maximum input plus maximum output length) as well as the training path, and report against the tier's actual free memory rather than a fixed constant.
+- Because the fp16 path needs loss scaling, the gate must also confirm the loss is finite and the gradient scaler is not in persistent overflow.
+
+---
+
+## ADR-019: Freeze the Cross-Split Duplication Handling Policy Before the Audit Runs
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Trigger:** `reviews/phase_2_adversarial.md` Findings 3, 4 and 13 (Codex adversarial review, Phase 2 entry gate). USER DECISION REQUIRED → decided by the user. Concretizes ADR-008.
+
+**Context:**
+ADR-008 requires a cross-split duplication audit and requires its handling policy to be pre-registered *before* the audit is run, so the policy cannot be chosen once the duplicate count is known. The draft proposal violated this by defaulting to "report only," justified by the claim that a train↔test duplicate "inflates both conditions, not one." The adversarial review established that this claim is **false**: the Fine-tuned condition has trained on the duplicate and the Base condition has not, so a memorized duplicate raises the Fine-tuned score selectively and manufactures exactly the apparent improvement the held-out split exists to rule out. Pairing the predictions on the same test row does not remove that training exposure. The review also found that near-duplicate template clusters break the i.i.d. assumption underlying receipt-level bootstrap resampling.
+
+**Decision:**
+Frozen before the audit executes:
+1. **Exact duplicates** (identical decoded RGB pixel content, hashed together with image dimensions and mode) found between `train` and `test` are **deterministically excluded from the test evaluation set**. The same applies to `validation`↔`test` exact duplicates.
+2. **Near-duplicate / template clusters** are not excluded. Instead they define resampling groups, and the paired bootstrap becomes **group-aware**: clusters, not individual receipts, are the resampling unit, so correlated receipts cannot be counted as independent evidence.
+3. The audit also covers `train`↔`validation`, to detect selection bias in checkpoint and hyperparameter choice.
+4. The exclusion count, the cluster structure, and the resulting effective sample size are reported in `results/report.md` in every case, including when nothing is excluded.
+5. The audit publishes **aggregate counts and a frozen automated verdict only** — never hashes, pair IDs, or candidate renderings — because a test-side hash can be joined against an already-viewed train or validation image and thereby reveal test content (ADR-008 test blindness).
+
+**Alternatives Considered:**
+- Report only, leaving the split untouched and downgrading the confirmatory claim if duplicates are found: keeps ADR-007's split inviolable, but knowingly leaves a leakage channel open in the primary comparison; not adopted.
+- Group-aware reconstruction of all three splits: strongest against contamination, but departs furthest from CORD's official split and forfeits comparability with other work on this dataset; not adopted.
+
+**Consequences:**
+- This departs from ADR-007's fixed `test = 100` count whenever an exact duplicate is found. That departure is authorized by this ADR; the realized test count is recorded in the result artifacts, and the decision rule is applied to the reduced set.
+- `EVALUATION_PROTOCOL.md` §6 must be updated to specify the group-aware paired bootstrap when the pre-registration is promoted.
+- The audit must be implemented and executed as a Phase 1 exit condition, before Phase 2.
+
+---
+
+## ADR-020: Adopt Strict Verbatim Transcription as the Evaluation Estimand
+
+- **Date:** 2026-08-12
+- **Status:** Accepted
+- **Trigger:** `reviews/phase_2_adversarial.md` Findings 8, 9 and 12 (Codex adversarial review, Phase 2 entry gate). USER DECISION REQUIRED → decided by the user.
+
+**Context:**
+The draft proposal instructed the model to "copy values verbatim ... do not convert, round, or reformat numbers," and simultaneously specified NFKC normalization and internal-whitespace collapse before scoring. The adversarial review found these contradictory — the instruction and the metric were measuring different tasks — and separately found that TED-Acc's alignment with the task had been asserted rather than established: Donut's TED uses character edit cost, so a materially wrong amount such as `58,000` versus `59,000` can cost a single character edit while a field-exact view treats the value as simply wrong.
+
+**Decision:**
+The estimand is **strict verbatim transcription**: the model must reproduce the value exactly as printed on the receipt, and the metric must agree with that definition.
+- No NFKC normalization, no case folding, no internal-whitespace collapse. Only leading/trailing whitespace is stripped.
+- Digit grouping, currency symbols, and full-width/half-width forms remain unnormalized, as the draft already proposed.
+- **TED-Acc remains the primary metric**, so `EVALUATION_PROTOCOL.md` §5's stated leading candidate is retained and Δ stays well defined per receipt.
+- A **per-receipt field-exact-match score is added as a mandatory secondary guardrail**, reported alongside TED-Acc for both conditions with its own paired confidence interval. Its purpose is to make TED-Acc's insensitivity to single-character amount errors visible rather than hidden.
+- Before any model output exists, both candidate metrics are probed on synthetic error cases (wrong amount digit, missing field, extra field, item reorder, invalid JSON, near-correct OCR) and the results are recorded in `EVALUATION_PROTOCOL.md` §5.1. This probe requires no model and no test data.
+
+**Alternatives Considered:**
+- Keeping the verbatim estimand but switching the primary metric to a per-receipt field-exact score: would treat a one-digit amount error as unambiguously wrong, but departs from the metric `EVALUATION_PROTOCOL.md` has named as the leading candidate since Phase 0 and would require newly defining hierarchical and repeated-row handling from scratch; not adopted.
+- Redefining the task as semantic extraction and enumerating every accepted equivalence: internally consistent, but any omission from the equivalence list silently becomes a scoring hole; not adopted.
+
+**Consequences:**
+- `EVALUATION_PROTOCOL.md` §5.1's normalization rules and `EXPERIMENT_SPEC.md` §4's prompt wording must be aligned to this estimand when the pre-registration is promoted.
+- ADR-017's `X = 0.05` is expressed in TED-Acc units.
+- The secondary field-exact metric is a reported guardrail, not part of the ADR-017 decision rule.
