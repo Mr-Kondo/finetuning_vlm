@@ -600,3 +600,67 @@ ADR-021 set a `NOT EVALUABLE` floor of 60 retained test receipts / 40 independen
 - Transitive propagation means a pathological chain could excise a large share of the test set. This is not absorbed silently: it surfaces as the floors firing and the result being `NOT EVALUABLE`, which is the correct outcome, since a test set that is largely a re-photograph of train cannot support a held-out claim.
 - `EVALUATION_PROTOCOL.md` §3 and §6 must record all three test floors, the validation floor, and the propagation rule when the pre-registration is promoted.
 - The audit implementation must compute components once over the full graph and report exclusion counts, retained counts, ESS, and realized validation size in every case, including when nothing is excluded.
+
+---
+
+## ADR-024: Adopt Per-Receipt Field-Value Multiset F1 as the Primary Metric, Superseding ADR-020's Metric Choice
+
+- **Date:** 2026-08-13
+- **Status:** Accepted
+- **Supersedes:** ADR-020's choice of TED-Acc as the primary metric. ADR-020's *estimand* (trimmed verbatim transcription, as amended by ADR-022) is unchanged and remains in force.
+- **Trigger:** The pre-registered P-11b synthetic-error probe required by ADR-009 fired its escalation condition. USER DECISION REQUIRED → decided by the user.
+
+**Context:**
+ADR-020 fixed TED-Acc as the primary metric on the strength of `EVALUATION_PROTOCOL.md` §5 naming it the "leading candidate", and Round 3 of the adversarial review objected that its alignment with the task had been *asserted* rather than established. The response was to require a synthetic-error probe **before any model output exists**, with a pre-registered consequence if TED-Acc scored ≥ 0.95 on a wrong amount digit.
+
+The probe was executed on 2026-08-13 against the six frozen fixtures, using the vendored evaluator at the pinned Donut commit. It produced two disqualifying results:
+
+| Case | TED-Acc | field-value multiset F1 |
+|---|---|---|
+| wrong amount digit (`58,000` → `59,000`) | **0.9839** | 0.8571 |
+| item reorder, every value correct | **0.5161** | 1.0000 |
+
+1. **TED-Acc is nearly blind to the error the task exists to catch.** The reference tree costs 62 units to build from empty; a materially wrong amount costs exactly 1 — 1.6% of the scale. ADR-017's threshold `X = 0.05` is three times the entire cost of getting an amount wrong, so a model could corrupt every amount on every receipt by one digit without moving the metric by a threshold's worth.
+2. **TED-Acc is hypersensitive to row order.** `zss` computes an *ordered* tree edit distance, so a pure row swap with all values correct costs 30 of 62 units. Row order in CORD is a scanning convention, not semantic content, so the metric penalises a non-error roughly 30× harder than a real one.
+
+**Decision:**
+The **per-receipt index-free field-value multiset F1** defined in the pre-registration §6.1 P-11a becomes the **primary metric** and the sole input to the ADR-017 decision rule. **TED-Acc is demoted to a reported secondary metric**, retained because `EVALUATION_PROTOCOL.md` has named it since Phase 0 and because its divergence from the primary is itself informative.
+
+Consequences that follow mechanically:
+- **ADR-017's `X = 0.05` is now expressed in field-F1 units.** The numeric value is unchanged, but its meaning is not: on the probe's two-item reference a single wrong field costs ~0.143, so `X` is roughly a third of one field error rather than three times one. The user was shown this and did not revise the value.
+- The paired bootstrap statistic becomes `Δ_i` in field-F1; the metric is per-receipt and additive, so the ADR-021/ADR-023 group-aware construction applies unchanged.
+- The metric is **order-insensitive by construction**, which is the intended behaviour for receipts but is a genuine loss of information if row order is ever considered meaningful. Recorded as a stated limitation rather than a silent property.
+- Its known blindness — index-free paths mean `(A,1),(B,2)` scores 1.0 against `(A,2),(B,1)`, as established by R3-8 — must be reported wherever the metric is reported. This blindness applies to Donut's own official F1 as well, since `flatten()` is index-free upstream too.
+
+**Alternatives Considered:**
+- **Keeping TED-Acc and reporting the limitation:** honours ADR-020 as written and avoids a metric change, but leaves the confirmatory claim resting on a statistic that barely responds to wrong amounts; not adopted.
+- **Co-primary metrics with a pre-registered combination rule:** more informative and still not post-hoc, but doubles the statistical surface and requires multiplicity handling that is itself machinery to get wrong; not adopted.
+
+**Consequences:**
+- `EXPERIMENT_SPEC.md` §8b and `EVALUATION_PROTOCOL.md` §5, §5.1 and §6 must record the primary/secondary swap and the probe table when the pre-registration is promoted.
+- **This decision was made before any model output existed**, on fixtures frozen in advance. That timing is what distinguishes it from post-hoc metric selection, and it is exactly what ADR-009's pre-registration deadline exists to guarantee. After Phase 2 runs, no equivalent change would be legitimate.
+
+---
+
+## ADR-025: Move the Phase-2 Test-Blindness Integration Test to a Phase 2 Entry Criterion
+
+- **Date:** 2026-08-13
+- **Status:** Accepted
+- **Trigger:** `reviews/phase_2_adversarial.md` Round 3, Finding R3-14 (remainder). USER DECISION REQUIRED → decided by the user.
+
+**Context:**
+R3-14 requires an integration test asserting that the *actual* Phase-2 loading path issues no test-split request, with the Hub boundary patched — separate names alone are not a capability boundary. That test cannot be written during Phase 1: it needs `notebooks/02_baseline.ipynb` and the Phase-2 loading code to exist, and those may not be written until the ADR-005 gate passes. As specified, the finding is circular and cannot be closed in either order.
+
+**Decision:**
+Split the requirement in two:
+
+1. **For the gate (Phase 1 exit):** the pre-registered guarantee is the *loader contract* — `vlm_lab.data` exposes no path to the test split, imports neither `vlm_lab.sealed_test` nor `vlm_lab.mechanical_access`, and its request-level unit test asserts on the split argument actually sent to the Hub rather than on the returned object. This is implemented and tested.
+2. **As a Phase 2 entry criterion:** the integration test over the real Phase-2 loading path must be the **first artifact written in Phase 2**, and must pass **before `02_baseline.ipynb` is executed even once**. Phase 2 may not proceed past that point without it.
+
+**Alternatives Considered:**
+- **Writing a stub Phase-2 loading path during Phase 1** purely so the test can exist: closes the finding literally, but pulls Phase-2 code into Phase 1 and is the scope violation `AGENTS.md` §40 warns against; not adopted.
+- **Accepting it as a documented residual risk:** cheapest, but leaves the one finding that concerns held-out integrity formally unclosed; not adopted.
+
+**Consequences:**
+- `IMPLEMENTATION_PLAN.md`'s Phase 2 section must record this entry criterion when the pre-registration is promoted.
+- The gate may treat R3-14 as closed, on the explicit understanding that half of it has been *deferred with a named trigger* rather than satisfied — recorded here so a later reader does not mistake it for fully discharged.

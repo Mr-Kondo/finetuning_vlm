@@ -416,9 +416,16 @@ enabled/disabled.
 
 ### 6.1 P-11 — Metrics (ADR-020)
 
-- **Primary:** TED-Acc, per receipt. Sole input to the ADR-017 decision rule.
-- **Mandatory diagnostic:** per-receipt **field-exact score**, defined below, reported with its own
-  paired cluster CI. `[R2-4]` v2 called this a "guardrail", but ADR-020 deliberately makes it
+> **SUPERSEDED BY ADR-024 (2026-08-13).** The probe below fired its escalation condition, and the
+> user switched the primary metric. The roles are now **reversed**: the per-receipt index-free
+> field-value multiset F1 is **primary** and the sole input to ADR-017's decision rule; TED-Acc is a
+> **reported secondary**. `X = 0.05` is now in field-F1 units — on the probe's two-item reference a
+> single wrong field costs ≈ 0.143, so `X` is about a third of one field error rather than three
+> times one. The original text is kept below for traceability.
+
+- ~~**Primary:** TED-Acc, per receipt. Sole input to the ADR-017 decision rule.~~
+- ~~**Mandatory diagnostic:** per-receipt **field-exact score**, defined below, reported with its own
+  paired cluster CI.~~ `[R2-4]` v2 called this a "guardrail", but ADR-020 deliberately makes it
   non-binding — a metric that cannot block a TED-Acc pass is a diagnostic, and calling it a guardrail
   overstated it. Its job is to make TED-Acc's insensitivity to single-character amount errors visible
   (`58,000` vs `59,000` costs one character edit but is a materially wrong amount) `[F8]`.
@@ -786,9 +793,16 @@ seed: 42            # LoRA init, data ordering, any sampling; single seed per AD
 
 ### 7.1 Decision rule (ADR-017)
 
-`X = 0.05`, on TED-Acc, against `CI_lower(Δ) ≥ X` from the §6.4 cluster bootstrap. Regression is
-`CI_upper(Δ) < 0`. Field-exact is reported alongside as a **diagnostic** and is **not** part of the
-decision rule (ADR-020, `[R2-4]`).
+`X = 0.05`, on the **per-receipt index-free field-value multiset F1** (ADR-024), against
+`CI_lower(Δ) ≥ X` from the §6.4 cluster bootstrap. Regression is `CI_upper(Δ) < 0`. **TED-Acc is
+reported alongside as a secondary metric** and is **not** part of the decision rule.
+
+The metric is per-receipt and additive, so `Δ_i` is well defined and the ADR-021/ADR-023 group-aware
+bootstrap applies unchanged. Two properties must be reported wherever it is reported: it is
+**order-insensitive by construction** (intended for receipts, but a real loss if row order is ever
+considered meaningful), and index-free paths make it **blind to row association** — `(A,1),(B,2)`
+scores 1.0 against `(A,2),(B,1)` `[R3-8]`. That blindness applies to Donut's own official F1 too,
+since its `flatten()` is index-free upstream.
 
 **Estimand (ADR-021, `[R2-2]`):** the confirmatory claim concerns **"CORD v2 test receipts with no
 exact or near duplicate in train or validation"** — not the official 100-row split, since ADR-019's
@@ -1310,11 +1324,17 @@ frozen as exact JSON, not categories), **R3-11** (telemetry allowlist separating
 **R3-12** (global `min_free_observed` condition alongside the allocator inequality), **R3-13** (step-time
 statistic and threshold; arm C explicitly two-process; arm D against a freshly *initialized* adapter).
 
-**Still open:** only **R3-14's remainder** — an integration test asserting that the real Phase-2
-loading path issues no test-split request. This cannot be written yet: `02_baseline.ipynb` does not
-exist, and may not be written until the gate passes. Proposed resolution, requiring user agreement:
-treat the loader contract plus its request-level unit test as the pre-registered guarantee, and make
-the integration test a **Phase 2 entry criterion** rather than a Phase 1 exit criterion.
+**R3-14's remainder is resolved by ADR-025**, which splits it: the *loader contract* plus its
+request-level unit test is the pre-registered guarantee for the gate (implemented and tested), and
+the integration test over the real Phase-2 loading path becomes a **Phase 2 entry criterion** — the
+first artifact written in Phase 2, passing before `02_baseline.ipynb` is executed even once. Half of
+the finding is therefore **deferred with a named trigger** rather than satisfied, and is recorded as
+such so a later reader does not mistake it for fully discharged.
+
+**All round-1, round-2 and round-3 findings are now dispositioned and addressed.** What remains before
+the gate can be re-reviewed is execution, not specification: §9 deliverables 1, 2, 5 and 8 (schema
+generation and token measurement on train+validation, the duplication audit run, and the four-arm
+VRAM gate) all require Colab.
 
 This document must not be promoted, and `02_baseline.ipynb` must not be executed, until a review
 passes.
