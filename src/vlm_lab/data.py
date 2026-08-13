@@ -5,6 +5,14 @@ Donut-format ``ground_truth`` JSON strings into a normalized structure.
 Both training targets and evaluation references depend on
 :func:`convert_ground_truth`, so correctness here matters more than
 feature breadth.
+
+**Held-out test blindness is a property of this module's API, not of caller
+discipline.** The development loader below cannot name the test split, and
+neither of the two loaders that can reach it lives here: Phase 5 uses
+:mod:`vlm_lab.sealed_test` and the duplication audit uses
+:mod:`vlm_lab.duplication_audit`. This module imports neither, so a Phase-2
+module that stays within `vlm_lab.data` has no path to the test split at all
+(review findings F5, R2-12, R3-14).
 """
 
 from __future__ import annotations
@@ -15,21 +23,58 @@ import datasets
 
 CORD_V2_REPO_ID = "naver-clova-ix/cord-v2"
 
+# The splits Phases 1-4 are permitted to read. Fixed in code so that no caller
+# argument can extend the set.
+DEVELOPMENT_SPLIT_NAMES = ("train", "validation")
+
+# Every split. Only :mod:`vlm_lab.duplication_audit` may use this set.
+ALL_SPLIT_NAMES = ("train", "validation", "test")
+
 # gt_parse keys that Donut's serializer collapses from a one-element list to
 # a bare dict. These must always be normalized back to a list.
 _REPEATABLE_GROUP_KEYS = ("menu", "void_menu")
 _REPEATABLE_NESTED_KEY = "sub"
 
 
-def load_cord_v2(revision: str | None = None) -> datasets.DatasetDict:
-    """Load the CORD v2 dataset (train/validation/test splits) from the Hub.
+def load_development_splits(revision: str | None = None) -> datasets.DatasetDict:
+    """Load the CORD v2 train and validation splits, and nothing else.
+
+    This is the loader for Phases 1-4, including ``notebooks/02_baseline.ipynb``.
+
+    The capability is baked into the function: there is no parameter through
+    which a caller can name a split, so the held-out test split is unreachable
+    here whatever arguments are passed (R2-12). Each split is requested from the
+    Hub by name, so `test` is never requested, downloaded, or materialized —
+    filtering an already-loaded three-split `DatasetDict` would not have that
+    property.
 
     ``revision`` is passed through to ``datasets.load_dataset`` untouched;
-    ``None`` follows the Hub's default revision. Full revision pinning to a
-    specific commit is a separate, later Phase 1 exit condition (ADR-015),
-    not implemented here.
+    ``None`` follows the Hub's default revision. Pinning it to the ADR-015
+    commit SHA is a separate exit condition, not done here.
     """
-    return datasets.load_dataset(CORD_V2_REPO_ID, revision=revision)
+    return load_named_splits(DEVELOPMENT_SPLIT_NAMES, revision)
+
+
+def load_named_splits(
+    split_names: tuple[str, ...],
+    revision: str | None,
+) -> datasets.DatasetDict:
+    """Request each named split from the Hub individually and collect them.
+
+    Shared low-level helper. It is *not* a capability boundary — the boundary is
+    which module exposes which split set (see this module's docstring). Callers
+    outside :mod:`vlm_lab.data`, :mod:`vlm_lab.sealed_test` and
+    :mod:`vlm_lab.duplication_audit` should use one of those named entry points
+    instead, so that every deliberate test-split read is logged.
+    """
+    return datasets.DatasetDict(
+        {
+            split_name: datasets.load_dataset(
+                CORD_V2_REPO_ID, split=split_name, revision=revision
+            )
+            for split_name in split_names
+        }
+    )
 
 
 def _as_list(value: object) -> list:

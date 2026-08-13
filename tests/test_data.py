@@ -1,19 +1,30 @@
 """Unit tests for src/vlm_lab/data.py's deterministic, network-independent logic.
 
 These tests exercise `convert_ground_truth` against inline fixture JSON
-strings only. They do not call `load_cord_v2` or otherwise touch the
-network, so `pytest tests/` stays fast and can run without Hub access.
-Network-dependent dataset loading is validated separately in the Phase 1
+strings, and the split-scoped loaders against a patched Hub boundary. They
+never touch the network, so `pytest tests/` stays fast and can run without Hub
+access. Network-dependent dataset loading is validated separately in the Phase 1
 notebooks, per AGENTS.md's local-vs-Colab validation split.
 """
 
 from __future__ import annotations
 
+import ast
+import importlib
+import inspect
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
-from vlm_lab.data import CORD_V2_REPO_ID, convert_ground_truth, load_cord_v2
+import vlm_lab.data
+from vlm_lab.data import (
+    CORD_V2_REPO_ID,
+    DEVELOPMENT_SPLIT_NAMES,
+    convert_ground_truth,
+    load_development_splits,
+)
 
 
 def test_convert_ground_truth_wraps_single_dict_menu_in_list():
@@ -236,13 +247,86 @@ def test_cord_v2_repo_id_constant_matches_expected_hub_repo():
     assert CORD_V2_REPO_ID == "naver-clova-ix/cord-v2"
 
 
+def test_load_development_splits_never_requests_the_test_split_from_the_hub(
+    recorded_hub_split_requests,
+):
+    # Asserting on the *request* rather than on the returned object is the point
+    # (R2-12): a loader that downloaded all three splits and then dropped `test`
+    # would still return a test-free DatasetDict, and would still have read it.
+    load_development_splits()
+
+    requested_splits = [call["split"] for call in recorded_hub_split_requests]
+    assert requested_splits == list(DEVELOPMENT_SPLIT_NAMES)
+    assert "test" not in requested_splits
+    assert all(call["repo_id"] == CORD_V2_REPO_ID for call in recorded_hub_split_requests)
+
+
+def test_load_development_splits_passes_the_revision_through_to_the_hub(
+    recorded_hub_split_requests,
+):
+    load_development_splits(revision="7f0115a4b758a71d6473b8d085751692da2fef98")
+
+    assert all(
+        call["revision"] == "7f0115a4b758a71d6473b8d085751692da2fef98"
+        for call in recorded_hub_split_requests
+    )
+
+
+def test_load_development_splits_has_no_parameter_that_can_name_a_split():
+    # The capability lives in the function, not in an argument: `revision` is the
+    # only knob, so there is nothing a caller can set to "test" (F5, R2-12).
+    parameter_names = list(inspect.signature(load_development_splits).parameters)
+
+    assert parameter_names == ["revision"]
+
+
+def test_load_development_splits_returns_only_train_and_validation(
+    recorded_hub_split_requests,
+):
+    result = load_development_splits()
+
+    assert set(result.keys()) == {"train", "validation"}
+
+
+def test_data_module_does_not_import_the_sealed_test_module():
+    # R3-14: Phase-2 code that stays inside `vlm_lab.data` must have no import
+    # path to the sealed loader at all. Checked both statically (no import
+    # statement) and dynamically (a fresh import does not pull it in).
+    imported_modules = _module_names_imported_by(Path(vlm_lab.data.__file__))
+    assert not any(name.endswith("sealed_test") for name in imported_modules)
+
+    preserved_modules = {
+        name: module for name, module in sys.modules.items() if name.startswith("vlm_lab")
+    }
+    try:
+        for name in preserved_modules:
+            del sys.modules[name]
+        importlib.import_module("vlm_lab.data")
+
+        assert "vlm_lab.sealed_test" not in sys.modules
+    finally:
+        sys.modules.update(preserved_modules)
+
+
 @pytest.mark.skip(
     reason="network: downloads the real naver-clova-ix/cord-v2 dataset from "
     "the Hugging Face Hub; excluded from the default fast local suite. "
     "Run manually (remove this marker) when Hub access and time budget "
     "allow, or exercise it from the Phase 1 notebook instead."
 )
-def test_load_cord_v2_downloads_dataset_dict_with_expected_splits():
-    result = load_cord_v2()
+def test_load_development_splits_downloads_train_and_validation_from_the_real_hub():
+    result = load_development_splits()
 
-    assert set(result.keys()) == {"train", "validation", "test"}
+    assert set(result.keys()) == {"train", "validation"}
+
+
+def _module_names_imported_by(module_path: Path) -> list[str]:
+    """Return every module name imported by `module_path`, from its source AST."""
+    imported_names: list[str] = []
+    for node in ast.walk(ast.parse(module_path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            imported_names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported_names.append(node.module)
+            imported_names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+    return imported_names

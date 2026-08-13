@@ -915,23 +915,36 @@ NO-GO triggers the §4 fallback ladder, a re-run, and re-recording — all befor
 depends on caller discipline. `[R2-12]` v2's "explicit allowed-splits argument" was no better: a
 parameter the caller supplies is a parameter the caller can set to `"test"`.
 
-**Three separately-named entry points, with capability baked into the function, not into an
-argument:**
+**Three entry points in three separate modules.** Capability is baked into *which module exposes
+what*, not into an argument the caller supplies:
 
-| API | Splits reachable | Used by |
+| Module / API | Splits reachable | Used by |
 |---|---|---|
-| `load_development_splits()` | `train`, `validation` **only** — has *no parameter capable of naming test* | Phases 1–4, including `02_baseline.ipynb` |
-| `load_for_duplication_audit()` | all three, but returns **hashes and counts only**, never images or ground-truth content (§8.1) | the ADR-008/ADR-019 audit |
-| `load_sealed_test_split()` | `test` | Phase 5 only |
+| `vlm_lab.data.load_development_splits()` | `train`, `validation` **only** — *no parameter can name test* | Phases 1–4, including `02_baseline.ipynb` |
+| `vlm_lab.mechanical_access.load_all_splits_for_mechanical_check(purpose)` | all three, for **counts and hashes only** — never images or ground-truth content (§8.1) | the ADR-008/ADR-019 audit, and `01_dataset.ipynb`'s mechanical parse-count check |
+| `vlm_lab.sealed_test.load_sealed_test_split()` | `test` | Phase 5 only |
 
-`load_for_duplication_audit()` and `load_sealed_test_split()` **log every invocation** (timestamp,
-caller module, git commit) to an append-only access log committed with the results, so
-`EXPERIMENT_SPEC.md` §8b's "one test execution" is auditable rather than asserted.
+`vlm_lab.data` imports **neither** of the other two, so Phase-2 code that stays inside it has no
+import path to the test split at all. An earlier draft of this section put the audit loader *inside*
+`data.py`, which reproduced the exact footgun `[F5]`/`[R3-14]` are about — every Phase-2 module
+importing `vlm_lab.data` would have seen an all-splits function sitting right there. Corrected.
+
+Both test-reachable loaders **log every invocation** (timestamp, caller module, git commit, and a
+required `purpose` string) to an append-only access log committed with the results, so
+`EXPERIMENT_SPEC.md` §8b's "one test execution" is auditable rather than asserted. `purpose` is
+mandatory precisely so the record says *why* test was touched, not merely that it was.
+
+**Honest limit, stated rather than overclaimed.** Python has no capability enforcement — a determined
+caller can import any module, and the shared `load_named_splits` helper can name any split. What the
+module split buys is that the test split is unreachable *by accident* from the development path, and
+that every deliberate reach is named, logged, and visible in review. The access log, not the import
+graph, is the durable evidence.
 
 **Test asserts on the request, not the return value `[R2-12]`:** the unit test patches the loading
 boundary and asserts that the *split argument actually sent to the Hub* from
 `load_development_splits()` never contains `"test"` — checking the returned object would pass even if
-test had already been downloaded.
+test had already been downloaded. This was verified by mutation: making the loader fetch all three
+splits and filter afterwards fails the request-level test while still passing a return-value check.
 
 ### 8.4 P-22 — Per-sample evidence artifact `[F17]`
 
