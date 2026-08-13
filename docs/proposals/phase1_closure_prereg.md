@@ -455,9 +455,48 @@ whole thing a custom pipeline whose differences must be documented. Requirements
    ```
 
    The SHA is recorded in `EVALUATION_PROTOCOL.md` §5.1 and in every result artifact.
-2. Transcribe the pinned source's **actual** behaviour into §5.1 in prose — field flattening, key
-   accumulation, `menu` ordering, duplicate-row handling, the F1 aggregation level, and the TED
-   normalization denominator. Not asserted from memory here; it is a §9 deliverable.
+2. **Transcribed from the pinned source, 2026-08-13** — read directly from
+   `donut/util.py@4cfcf97`, not from memory. This closes the transcription half of `[F11]`:
+
+   - **`normalize_dict`** sorts dict keys by `(len(key), key)`, so key **order is normalized away**;
+     wraps every scalar value in a one-element **list**; and calls `str(value).strip()` on scalars —
+     so it **stringifies** and **trims** every leaf. It also **drops falsy values**: `if not data:
+     return {}` and `if value:` before assignment, so empty strings, empty dicts and empty lists
+     disappear on both sides.
+   - **`flatten`** emits `(dotted_path, value)` pairs in which **array indices are absent** — a
+     two-row `menu` yields `("menu.nm", "A"), ("menu.price", "1"), ("menu.nm", "B"), …`.
+   - **`cal_f1`** is a global micro-F1 over those pairs, matched as a **multiset**
+     (`answer.remove(field)` on each hit), returning `TP / (TP + (FP+FN)/2)` — algebraically
+     `2·TP / (2·TP + FP + FN)`.
+   - **`cal_acc`** builds a tree (`<root>` → keys → `<subtree>` per list item → `<leaf>`-prefixed
+     values), computes `zss.distance` with character `edit_distance` between leaf labels, and
+     normalizes by **`TED(tree_of_empty_prediction, answer)`** — *not* by the answer's node count —
+     then returns `max(0, 1 − nTED)`, so TED-Acc is bounded to `[0, 1]`.
+
+   **Four consequences that change or confirm this document:**
+
+   1. **The trimmed-verbatim estimand is correct, not a compromise** (ADR-022). `normalize_dict`
+      strips every scalar, so literal character-for-character scoring is unreachable through this
+      evaluator. §5.3's prompt now matches what is computed.
+   2. **§5.3's empty-string rule is confirmed by the source**, not merely asserted: falsy leaves are
+      dropped on both sides, which is exactly "empty counts as absent".
+   3. **Donut's own F1 is itself index-free**, so `[R3-8]`'s association-blindness criticism applies to
+      the official secondary metric too, not only to §6.1's companion metric. Both are reported with
+      that limitation stated.
+   4. **A numeric leaf still matches its string counterpart on content**, because `normalize_dict`
+      stringifies. This is precisely why §6.5 reports **strict schema validity separately** — content
+      credit and schema conformance genuinely diverge here.
+
+   **Two operational details that must be pinned in the wrapper:**
+
+   - `donut/util.py` imports `torch`, `datasets` and `transformers` at module level (for the
+     unrelated `DonutDataset` class in the same file). Vendoring the file wholesale would drag the
+     entire training stack into evaluation, so **only the `JSONParseEvaluator` class is extracted**,
+     with its `zss` / `nltk` / `json` imports and the upstream MIT license header.
+   - `cal_acc`'s denominator is `TED(empty, answer)`, which is **zero when `answer` is empty**,
+     raising `ZeroDivisionError`. No CORD receipt is empty, but the wrapper must handle it explicitly
+     rather than crash: an empty reference scores `1.0` if the prediction is also empty and `0.0`
+     otherwise, and the occurrence is recorded.
 3. Pin **both** `zss` **and `nltk`** with exact `==` versions — official `donut/util.py` imports
    `nltk.edit_distance` directly, which v1 missed.
 4. Freeze regression fixtures with known scores, so a dependency drift cannot silently change the
