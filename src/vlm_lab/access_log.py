@@ -3,7 +3,7 @@
 `EXPERIMENT_SPEC.md` §8b allows exactly one test-split execution. That claim is
 only auditable if every load that can reach `test` leaves a durable trace, so
 :func:`record_split_access` is called by :func:`vlm_lab.sealed_test.load_sealed_test_split`
-and :func:`vlm_lab.duplication_audit.load_for_duplication_audit`.
+and :func:`vlm_lab.mechanical_access.load_all_splits_for_mechanical_check`.
 
 The development loader deliberately does *not* log: it cannot reach `test` at all,
 so there is nothing to audit.

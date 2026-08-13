@@ -10,7 +10,7 @@ feature breadth.
 discipline.** The development loader below cannot name the test split, and
 neither of the two loaders that can reach it lives here: Phase 5 uses
 :mod:`vlm_lab.sealed_test` and the duplication audit uses
-:mod:`vlm_lab.duplication_audit`. This module imports neither, so a Phase-2
+:mod:`vlm_lab.mechanical_access`. This module imports neither, so a Phase-2
 module that stays within `vlm_lab.data` has no path to the test split at all
 (review findings F5, R2-12, R3-14).
 """
@@ -27,7 +27,7 @@ CORD_V2_REPO_ID = "naver-clova-ix/cord-v2"
 # argument can extend the set.
 DEVELOPMENT_SPLIT_NAMES = ("train", "validation")
 
-# Every split. Only :mod:`vlm_lab.duplication_audit` may use this set.
+# Every split. Only :mod:`vlm_lab.mechanical_access` may use this set.
 ALL_SPLIT_NAMES = ("train", "validation", "test")
 
 # gt_parse keys that Donut's serializer collapses from a one-element list to
@@ -64,7 +64,7 @@ def load_named_splits(
     Shared low-level helper. It is *not* a capability boundary — the boundary is
     which module exposes which split set (see this module's docstring). Callers
     outside :mod:`vlm_lab.data`, :mod:`vlm_lab.sealed_test` and
-    :mod:`vlm_lab.duplication_audit` should use one of those named entry points
+    :mod:`vlm_lab.mechanical_access` should use one of those named entry points
     instead, so that every deliberate test-split read is logged.
     """
     return datasets.DatasetDict(

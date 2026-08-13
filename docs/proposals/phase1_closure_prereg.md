@@ -581,14 +581,33 @@ min_independent_clusters: 40          # ADR-021 NOT EVALUABLE floor
 which is not reproducible: Hamming adjacency is not transitive, so connected-components and
 complete-linkage disagree, and it was unstated which signals contribute edges.
 
-1. **Vertices:** the receipts of the **retained test set** — i.e. *after* ADR-021's cross-split
+1. **Vertices:** the receipts of the **retained test set** — i.e. *after* ADR-023's cross-split
    exclusions have been applied. Clustering is therefore about residual **within-test** dependence
    only; cross-split leakage is handled by exclusion, never by clustering `[R2-1]`.
+
+   > **This is the same graph as §8.1's, not a second one.** §8.1 builds one graph over all 1000
+   > receipts *before* exclusion; this section describes the graph over the retained test set
+   > *after* it. They coincide, and the reason is worth writing down so nobody later "fixes" one
+   > into a genuinely separate computation: a retained test receipt is by definition in a component
+   > containing no train or validation receipt, so its component is entirely test, and the subgraph
+   > induced on the retained set equals that component exactly. **Implementations must compute the
+   > components once, in §8.1, and reuse the pure-test components here.**
 2. **Edges:** an undirected edge joins two test receipts when **either** their decoded-pixel hashes
    are equal (§8.1), **or** their dHash Hamming distance is `≤ 3`, **or** their value-inclusive
    canonical ground-truth hashes are equal. The **type-only template signature contributes no edges**
    — it would collapse many independent receipts into a few enormous clusters and is reported
    separately as template evidence only `[R2-3]`.
+
+   **dHash parameters, pinned.** "dHash" alone is not a frozen signal: a different reduction filter
+   or bit order moves borderline pairs across the `≤ 3` line, which changes which receipts are
+   excluded. Fixed here:
+
+   ```yaml
+   dhash_resample_filter: LANCZOS     # PIL.Image.Resampling.LANCZOS
+   dhash_grayscale_size:  [9, 8]      # width x height, before the horizontal difference
+   dhash_bit_order:       row-major, most-significant-bit first
+   dhash_max_distance:    3
+   ```
 3. **Linkage:** **connected components** of that graph. Chosen over complete-linkage because it is
    deterministic, order-independent, and conservative (it never splits a genuinely dependent pair).
 4. **Ordering:** exclusions are applied first, then the graph is built **once** over the retained set
@@ -606,6 +625,16 @@ is the plain mean over retained receipts. The 95% percentile interval is taken o
 If every cluster is a singleton, this degenerates exactly to the ordinary paired receipt bootstrap;
 that evidence is recorded either way `[F13]`.
 
+**Floors are compared with `>=`**, matching ADR-021/ADR-023's wording "falls below": exactly 60
+receipts, exactly 40 clusters and exactly ESS 50 all pass. The worked example below sits on both
+count floors deliberately.
+
+**Note that the floors are not independent.** Propagation removes a train-linked test receipt
+*together with its whole within-test cluster*, so exclusion preferentially removes clustered rows and
+therefore tends to **raise** ESS while lowering the receipt and cluster counts. A retained set can
+comfortably clear the ESS floor while failing the count floors; the converse is rarer. All three are
+still checked, because they fail in different directions.
+
 **`NOT EVALUABLE` floors (ADR-021), and what they are *not* `[R3-6]`.** The confirmatory
 comparison is declared `NOT EVALUABLE`, with no improvement claim made, if **any** of these fails on
 the retained test set:
@@ -618,7 +647,7 @@ min_effective_sample_size: 50    # Kish ESS, added in response to R3-6
 
 These are **pre-registered minimum-stability safeguards, not evidence that `X = 0.05` is
 resolvable.** Count floors do not determine CI width: 39 singleton clusters plus one 21-row cluster
-clears both count floors while Kish ESS is only `100² / (39·1² + 21²) = 3600/480 = 7.5`. That is why
+clears both count floors while Kish ESS is only `60² / (39·1² + 21²) = 3600/480 = 7.5`. That is why
 the ESS floor exists alongside them, and why ADR-021's amended wording says "resolvable at the
 retained sample size, subject to the floors" rather than asserting resolvability. **Precision above
 the floors remains outcome-dependent**, and the realized CI width is reported as such rather than
@@ -1113,9 +1142,17 @@ what made it so:
   renamed to include its hash, and the hash is recorded in `metrics.json`. Rewriting produces a
   different filename rather than mutating a file in place.
 - **Exclusion manifest `[R2-14]`:** evaluated-row records alone cannot prove the *right* rows were
-  excluded, so a separate sealed manifest lists every excluded row ID, the relation that caused it
-  (`train↔test` exact, `validation↔test` near, …) and the cluster ID, plus its own hash. Sealed until
-  Phase 5 completes; before then only aggregate counts are published (§8.1 test blindness).
+  excluded, so a separate sealed manifest lists every excluded row ID, the relations implicating it,
+  and the component ID, plus its own hash. Sealed until Phase 5 completes; before then only aggregate
+  counts are published (§8.1 test blindness).
+
+  **Attribution is a set of relations, not one relation.** An earlier draft asked for *the* relation
+  that caused each exclusion, which is not well defined under ADR-023's component propagation: a
+  receipt can be excluded while having no direct match of any kind, and its component can contain
+  both train and validation receipts. Nor is the exact-vs-near distinction recoverable per row once a
+  component is formed. The manifest therefore records, per excluded row, the set of relations present
+  in its component, and the per-relation counts published in §8.1 are **deliberately overlapping**;
+  the non-overlapping total is the retained/excluded receipt count.
 
 ---
 

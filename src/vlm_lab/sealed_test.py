@@ -11,7 +11,7 @@ Importing this module is itself the signal that Phase 5 has begun. Nothing in
 Phases 1-4, including `notebooks/02_baseline.ipynb` and the training code, may
 import it. Phases 1-4 use :func:`vlm_lab.data.load_development_splits`; the
 ADR-008 duplication audit uses
-:func:`vlm_lab.duplication_audit.load_for_duplication_audit`, which reads
+:func:`vlm_lab.mechanical_access.load_all_splits_for_mechanical_check`, which reads
 test rows for hashing only.
 """
 
