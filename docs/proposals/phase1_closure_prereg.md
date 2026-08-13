@@ -472,6 +472,39 @@ Both metrics are scored on all six and the resulting table is transcribed into
 `EVALUATION_PROTOCOL.md` §5.1. The fixtures are committed and asserted in CI, so a later change to
 the evaluator or its dependencies shows up as a fixture diff rather than a silent metric shift.
 
+### P-11b RESULTS — executed 2026-08-13, before any model output exists
+
+Run on the six frozen fixtures above with the vendored evaluator at the pinned commit. Independently
+re-verified by Claude Code, not taken from the implementation report.
+
+| # | Case | TED-Acc | field-value multiset F1 |
+|---|---|---|---|
+| 1 | wrong amount digit (`58,000` → `59,000`) | **0.9839** | 0.8571 |
+| 2 | missing field (`cnt` removed) | 0.9677 | 0.9231 |
+| 3 | extra field (`unitprice` added) | 0.8871 | 0.9333 |
+| 4 | **item reorder** (values all correct) | **0.5161** | 1.0000 |
+| 5 | invalid JSON | 0.0 | 0.0 |
+| 6 | near-correct OCR | 0.9677 | 0.8571 |
+
+**The §6.1 escalation condition FIRED.** Fixture 1 scores `0.9839 ≥ 0.95`. Concretely: the reference
+tree costs 62 units to build from empty, and a materially wrong amount costs exactly **1** of those —
+**1.6% of the scale**. ADR-017's decision threshold `X = 0.05` is **three times the entire cost of
+getting an amount wrong**, so a model could get every amount on every receipt wrong by one digit and
+still miss the threshold's worth of TED-Acc movement.
+
+**A second problem the probe found, which this document did not anticipate.** `zss` computes an
+**ordered** tree edit distance, so fixture 4 — every value correct, two menu rows swapped — costs
+**30 of 62 units**, scoring 0.5161. TED-Acc therefore penalises a pure row-order difference roughly
+**30× harder than a materially wrong amount**, on a dataset where row order is a reading-order
+convention rather than semantic content. The diagnostic scores the same case 1.0, so the two metrics
+diverge maximally exactly here.
+
+Taken together: the primary metric is **nearly blind to the error type this task exists to measure,
+and hypersensitive to one that arguably is not an error at all**. Per §6.1 this triggers a new
+`USER DECISION REQUIRED` on the primary metric, to be resolved **before Phase 2 runs**. It is not
+post-hoc metric shopping: no model output exists, the fixtures were frozen before execution, and this
+is precisely why the probe was required to precede Phase 2.
+
 Its status is **characterization, not a selection procedure**: it documents how each metric responds,
 and it **cannot** change the primary metric on its own, because ADR-020 already fixed that and a
 metric chosen from probe behaviour after the fact would be a post-hoc selection. The single defined
@@ -523,8 +556,23 @@ whole thing a custom pipeline whose differences must be documented. Requirements
    1. **The trimmed-verbatim estimand is correct, not a compromise** (ADR-022). `normalize_dict`
       strips every scalar, so literal character-for-character scoring is unreachable through this
       evaluator. §5.3's prompt now matches what is computed.
-   2. **§5.3's empty-string rule is confirmed by the source**, not merely asserted: falsy leaves are
-      dropped on both sides, which is exactly "empty counts as absent".
+   2. **§5.3's empty-string rule is confirmed by the source only for the truly empty string.**
+      `normalize_dict` drops falsy leaves, so `""` disappears on both sides. **But it tests
+      `if not data` *before* calling `.strip()`**, so a whitespace-only value such as `"   "`
+      **survives** as a `<leaf>` with an empty label whose parent key node still costs 1.
+
+      > **[CORRECTED]** §6.2 previously called the whole empty-value rule "confirmed by the source",
+      > and §6.3 said a leaf empty *after trimming* counts as absent "matching the vendored
+      > evaluator's `normalize_dict`". That is wrong for whitespace-only values, and it was asserted
+      > with more confidence than the source supports. Measured:
+      > `ted_accuracy({"a":"x","b":"   "}, {"a":"x"})` = **0.5**, while the same pair scores **1.0**
+      > under the diagnostic, which applies §6.1's trim-then-drop literally. The truly empty string
+      > behaves as documented: the same comparison with `""` scores 1.0.
+      >
+      > The evaluator is **not patched** — ADR-022 declined to patch it, and doing so would make the
+      > pinned vendoring meaningless. The divergence is characterised by a test instead, and the two
+      > metrics are documented as disagreeing on whitespace-only leaves. CORD ground truth is not
+      > expected to contain them, but a *model* can emit one, so this is a real prediction-side path.
    3. **Donut's own F1 is itself index-free**, so `[R3-8]`'s association-blindness criticism applies to
       the official secondary metric too, not only to §6.1's companion metric. Both are reported with
       that limitation stated.
