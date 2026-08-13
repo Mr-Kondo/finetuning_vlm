@@ -1,12 +1,12 @@
 # STATE.md — Current State
 
-**Last updated:** 2026-08-13 (§9 schema/token-budget/duplication-audit deliverables executed for real against the live CORD v2 corpus; new `USER DECISION REQUIRED` — ADR-026 — found by that execution)
+**Last updated:** 2026-08-14 (both `01a_closure_measurements.ipynb` and `01b_vram_gate.ipynb` executed for real on Colab; the VRAM gate ran GO on all four arms but on the wrong GPU tier — new `USER DECISION REQUIRED`, ADR-027)
 
 This file must always reflect the latest state. Agents must always read this file before starting work in this repository ([[CLAUDE]] / [[AGENTS]]).
 
 ## Current Phase
 
-**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: 6 of 8 §9 pre-registration deliverables are now done, three of them (schema, token budget, duplication audit) with real, non-fabricated, Hub-connected execution evidence against the live CORD v2 corpus (see "§9 Deliverables — Real Execution Results" below). Two blockers remain: `USER DECISION REQUIRED` on ADR-026 (a real data-quality finding that execution surfaced, affecting `convert_ground_truth` and training targets, not just the schema), and a real Colab T4 run of the VRAM gate. The Phase 2 entry gate has been run three times (v1, v2, v3) and returned BLOCK each time — see "Phase 2 Entry Gate" below.**
+**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: `notebooks/01a_closure_measurements.ipynb` and `notebooks/01b_vram_gate.ipynb` have both now been executed for real on Colab with zero errors. `01a`'s three deliverables (schema, token budget, duplication audit) are real, Hub-connected results. `01b`'s VRAM gate also produced a real GO verdict on all four arms — but on an `NVIDIA RTX PRO 6000 Blackwell` GPU (~95 GiB), not the free-tier T4 ADR-018 pre-registered, so the tier question itself remains open. Two blockers remain, both `USER DECISION REQUIRED`: **ADR-026** (a real data-quality finding affecting `convert_ground_truth` and training targets, not just the schema) and **ADR-027** (the VRAM gate ran on the wrong tier — re-run on a real T4, or formally supersede ADR-018). The Phase 2 entry gate has been run three times (v1, v2, v3) and returned BLOCK each time — see "Phase 2 Entry Gate" below.**
 
 - Phase 0 is complete. The user approved the Phase 0 → Phase 1 transition explicitly; the ADR-005 adversarial-review gate for this transition was already satisfied by `reviews/phase_0_adversarial.md` (no new adversarial review was required to start Phase 1 — see that review and `reviews/phase_1_code_review.md` for the record).
 - This session's Phase 1 task was explicitly scoped to: repository/environment bootstrap, `notebooks/00_environment.ipynb`, `notebooks/01_dataset.ipynb`, `src/vlm_lab/data.py`, and local tests. It did **not** cover every exit condition listed in `IMPLEMENTATION_PLAN.md`'s Phase 1 section — see "Unresolved Open Items" below for what remains.
@@ -110,21 +110,28 @@ this session's Phase 1 closure work depends on this being resolved first, but §
 cannot be finalized until it is, and `configs/cord_v2_output.schema.json` /
 `configs/derived_budget.yaml` will need regenerating once `convert_ground_truth` changes.
 
-**2. Run the ADR-014/ADR-018 VRAM gate on a real Colab T4.** `notebooks/01b_vram_gate.ipynb` is
-implemented, consumes the real `configs/derived_budget.yaml` produced in step 1 above, but needs an
-actual GPU — none was available in the environment that ran the CPU-only measurements. This is the
-last remaining §9 deliverable requiring execution rather than specification or implementation.
+**2. `USER DECISION REQUIRED` — ADR-027, blocking.** `notebooks/01b_vram_gate.ipynb` was executed for
+real on Colab (pushed back as commit `3f3f44a`, all four arms genuinely GO, zero errors) — but the GPU
+it ran on was an **NVIDIA RTX PRO 6000 Blackwell Server Edition (~95 GiB VRAM)**, not the free-tier T4
+that ADR-018 pre-registered ("run on the free-tier T4 first, then decide the tier"). The four-arm
+protocol itself is validated by this run (real numbers, ADR-012's param/prefix assertions held), but
+the tier question ADR-018 exists to answer is still unanswered — a GO verdict with tens of GiB to
+spare says nothing about whether the same protocol passes on a real 16 GiB T4. See ADR-027 for the
+full finding and three options awaiting a decision (re-run on a real T4 / supersede ADR-018 / treat
+this run as non-binding).
 
-**3. Once 1 and 2 are resolved: promote and re-review.** Fold ADR-026's resolution and the real VRAM
-gate numbers into `EXPERIMENT_SPEC.md` / `EVALUATION_PROTOCOL.md` / `IMPLEMENTATION_PLAN.md` / new
-ADRs (§9 item 9), create `configs/qwen_cord_{smoke,mini,full}.yaml`, produce the resolved dependency
-lock artifact (§7.5, still open), and run ADR-005 review round 4 against the fully-executed proposal.
-Only after that may Phase 2 start.
+**3. Once 1 and 2 are resolved: promote and re-review.** Fold ADR-026's and ADR-027's resolutions and
+the real VRAM gate numbers into `EXPERIMENT_SPEC.md` / `EVALUATION_PROTOCOL.md` /
+`IMPLEMENTATION_PLAN.md` / new ADRs (§9 item 9), create `configs/qwen_cord_{smoke,mini,full}.yaml`,
+produce the resolved dependency lock artifact (§7.5, still open), and run ADR-005 review round 4
+against the fully-executed proposal. Only after that may Phase 2 start.
 
-**Everything else in the §9 checklist is done, with real, non-fabricated, Hub-connected execution
-evidence** (not simulated, not Colab-only): schema generation, token-budget derivation, and the
-cross-split duplication audit all ran for real against the full dataset on 2026-08-13. See "§9
-Deliverables — Real Execution Results" below for the numbers.
+**Everything else in the §9 checklist has real, non-fabricated, Hub-connected execution evidence**
+(not simulated): schema generation, token-budget derivation, and the cross-split duplication audit all
+ran for real against the full dataset on 2026-08-13 (`notebooks/01a_closure_measurements.ipynb`,
+confirmed re-executed cleanly on Colab too, commit `1a7cce4` — same results as the local run, no test
+content displayed). See "§9 Deliverables — Real Execution Results" below for the numbers, and the new
+"§9 Deliverable 8 — VRAM Gate" subsection below for the VRAM gate run itself.
 
 ## §9 Deliverables — Real Execution Results (2026-08-13)
 
@@ -164,6 +171,29 @@ cannot find multiple simultaneous culprits at one path — rewritten to determin
 set directly from the schema algorithm's own shape rules, cross-checked against a standalone
 diagnostic script before being trusted.
 
+## §9 Deliverable 8 — VRAM Gate — Executed, but on the Wrong Tier (2026-08-14)
+
+`notebooks/01b_vram_gate.ipynb` was executed for real on Colab (commit `3f3f44a`) — all 10 code cells
+ran with zero errors, and every number below is real, not simulated. **All four arms returned GO:**
+
+| Arm | max_memory_reserved | min_free_observed | Verdict |
+|---|---|---|---|
+| A-load | 4.336 GiB | 90.086 GiB | GO |
+| B-train | 11.227 GiB | 82.957 GiB | GO (soft NO-GO check also OK: 3.840s full vs. 7.508s = 2× half-budget ceiling) |
+| C1-save / C2-resume | 30.420 / 28.133 GiB | 58.907 / 61.227 GiB | GO / GO |
+| D-eval | 7.760 GiB | 86.455 GiB | GO |
+
+ADR-012's approval-gate assertions held for real: `33030144` trainable params (expected
+`33030144`), all under the real observed prefix `base_model.model.model.language_model.`.
+
+**But the GPU was `NVIDIA RTX PRO 6000 Blackwell Server Edition`, ~95 GiB VRAM, compute capability
+(12, 0) — not the free-tier T4 (Turing, sm_75, 16 GiB) ADR-018 pre-registered.** See **ADR-027**
+(`USER DECISION REQUIRED`, open, blocking): the protocol itself is validated by this run, but with
+tens of GiB of headroom to spare on every arm, this GO verdict provides no evidence about whether the
+same protocol passes on an actual T4, which was the entire point of ADR-018's "free tier first, then
+decide" ordering. `results/vram_gate_verdict.json` and the notebook's committed outputs are kept as
+protocol-validation evidence, not as the pre-registered measurement.
+
 ## USER DECISIONS — all four RESOLVED 2026-08-12
 
 The four items escalated by the Phase 2 gate review were decided by the user on 2026-08-12 and are
@@ -182,15 +212,15 @@ realized test count goes into the result artifacts.
 
 ## Unresolved Open Items (Blocking / Open)
 
-See [[EXPERIMENT_SPEC]] §10. The following remain open and were **not** addressed by this session's implementation (scoped out per the user's explicit task boundary for this session, not overlooked — see `reviews/phase_1_code_review.md` findings #2 and #6 for the disposition):
-- Fully-qualified LoRA target module names, target tower, and label masking ([[DECISIONS]] ADR-012, Phase 1 approval gate)
-- Finalized prompt template, shot design, and demo-selection procedure ([[DECISIONS]] ADR-009)
-- Image resolution and token budget
-- Primary metric, improvement threshold X, and paired-bootstrap configuration ([[EVALUATION_PROTOCOL]] §6, §5.1, [[DECISIONS]] ADR-009, ADR-010)
-- Production-shape VRAM go/no-go gate measurement ([[DECISIONS]] ADR-014)
-- Train/test duplication audit ([[DECISIONS]] ADR-008) — not yet implemented; `data.py` has no hashing/audit logic yet
-- Pinning of model/dataset/processor revisions (commit SHA) ([[DECISIONS]] ADR-015) — the SHAs are now identified (model `ebb281ec…`, dataset `7f0115a4…`) but are **not yet threaded through**: every loader still takes `revision=None`, i.e. the Hub default. Wiring them in and recording them in the artifacts remains open.
-- The Colab tier that will actually be used for the *training* phases (Phase 1's own Colab validation is done — confirmed Tesla T4, 16 GiB-class; whether that tier suffices for QLoRA training in Phase 3+ is a separate, not-yet-assessed question)
+See [[EXPERIMENT_SPEC]] §10. **This list predates the 2026-08-13/14 execution work and has not been fully reconciled against it** — several items below are now resolved or superseded but are left in place until the §9 item 9 promotion pass does that reconciliation properly; two are updated inline to avoid sitting next to directly-contradicting real results recorded above:
+- Fully-qualified LoRA target module names, target tower, and label masking ([[DECISIONS]] ADR-012, Phase 1 approval gate) — likely resolved: real `target_modules` regex, `r`/`alpha`/`dropout`, and a real `33030144`-trainable-param / correct-prefix assertion are now in `configs/derived_budget.yaml` and were confirmed to hold on real GPU hardware (see "§9 Deliverable 8" above). Not re-verified against `[[DECISIONS]] ADR-012`'s exact wording as part of this update.
+- Finalized prompt template, shot design, and demo-selection procedure ([[DECISIONS]] ADR-009) — the frozen §5.3 prompt text is loaded and used for real in `01a_closure_measurements.ipynb`; shot design/demo-selection status not re-verified here.
+- Image resolution and token budget — **resolved**, see "§9 Deliverables — Real Execution Results" above (`max_seq_len = 2064`, real measured distributions).
+- Primary metric, improvement threshold X, and paired-bootstrap configuration ([[EVALUATION_PROTOCOL]] §6, §5.1, [[DECISIONS]] ADR-009, ADR-010) — **resolved** via ADR-017 (X = 0.05) and ADR-024 (field-value multiset F1 primary).
+- Production-shape VRAM go/no-go gate measurement ([[DECISIONS]] ADR-014) — **executed for real, all four arms GO**, but on the wrong GPU tier; see "§9 Deliverable 8" above and **ADR-027** (`USER DECISION REQUIRED`, open).
+- Train/test duplication audit ([[DECISIONS]] ADR-008) — **implemented and executed for real**; see "§9 Deliverables — Real Execution Results" above (`EVALUABLE`, ADR-023).
+- Pinning of model/dataset/processor revisions (commit SHA) ([[DECISIONS]] ADR-015) — the real SHAs (model `ebb281ec…`, dataset `7f0115a4…`) are threaded through both `01a` and `01b`'s own notebook-level loading and are recorded in `configs/derived_budget.yaml`; whether every `src/vlm_lab` loader takes them as a parameter (vs. `revision=None` defaults) was not re-verified as part of this update.
+- The Colab tier that will actually be used for the *training* phases (Phase 1's own Colab validation is done — confirmed Tesla T4, 16 GiB-class; whether that tier suffices for QLoRA training in Phase 3+ is a separate, not-yet-assessed question) — see ADR-027: the most recent Colab run used a much larger, non-T4 tier, so this question is now entangled with ADR-027's disposition.
 
 ## Change Log
 
@@ -226,3 +256,5 @@ See [[EXPERIMENT_SPEC]] §10. The following remain open and were **not** address
 | 2026-08-13 | **`COLAB PASS` re-confirmed for both notebooks against the new split-scoped loader API** (commits `7d1e538`, `5d95539`). Verified by reading the committed notebook JSON rather than the verbal report, per the precedent earlier in this project where a verbal `cuda_available: True` was contradicted by the artifact: 0 error outputs and every code cell executed in both notebooks; `00_environment` again shows Tesla T4 / `cuda_available: True` / `Qwen3VLProcessor` loaded; `01_dataset` shows `load_development_splits() succeeded`, `train: 800 [OK]`, `validation: 100 [OK]`, `test: 100 rows (expected 100); 100/100 parsed successfully (0 failures)`, and 4 `image/png` outputs all from train/validation — ADR-008 test blindness intact, and the mechanical test read now goes through the access-logged `load_all_splits_for_mechanical_check("adr-008-mechanical-parse-count")` path. **One defect found in Claude Code's own guard**, added the previous day: it printed `Checked out <unknown> @ <unknown>`. Cause — `repo_dir` is the relative `"repo"` and `os.chdir(repo_dir)` runs before the guard, so `git -C repo rev-parse` resolved to `repo/repo` and failed; the guard ignored the return code and degraded to `<unknown>` instead of failing. That is precisely the swallow-the-error pattern that produced the earlier Pillow drift, reintroduced by the very check meant to prevent that class of bug. The substantive half of the guard (asserting `vlm_lab.data` exposes the required API) did work correctly and did pass. Fixed: the revision lookup now runs in the current directory and raises with the git exit code and stderr if it cannot determine the revision, so the cell refuses to report success on an unknown revision. Verified locally that the helper raises on exactly the failure it previously swallowed. |
 | 2026-08-13 | **Draft PR [#2](https://github.com/Mr-Kondo/finetuning_vlm/pull/2) opened** (`worktree-phase2-gate` → `main`, 17 files, +10637/−7587), at the user's request. It carries the Phase 1 closure work and the Phase 2 entry gate, and is explicitly **not** an authorization to start Phase 2: the ADR-005 gate is still BLOCK after three review rounds, nothing is promoted into the source-of-truth documents, and `notebooks/02_baseline.ipynb` does not exist. The PR body records the gate status, all six ADRs (017–022), the five substantive errors the reviews caught in Claude Code's own reasoning, the validation actually performed (local 53 passed/1 skipped; both notebooks `COLAB PASS` verified from the committed JSON) and what was **not** verified (the seven new dependency pins are unresolved — §8.2 arm A is their compatibility check). It also flags the merge action item: reset `GIT_REF` to `""` in both notebooks once merged. |
 | 2026-08-13 | **The pre-registered metric probe fired its escalation condition, and the user switched the primary metric (ADR-024). R3-14's remainder resolved as a Phase 2 entry criterion (ADR-025). All round-1/2/3 findings are now dispositioned and addressed.** Following the user's choice of option A (implement the §9 deliverables rather than open another document round), the duplication audit and the metric layer were implemented as bounded delegated tasks and integration-verified by Claude Code. **Local: 113 passed, 1 skipped**; `vlm_lab.evaluation` provably loads none of torch/transformers/datasets. The **P-11b probe**, run on the six frozen fixtures before any model output exists and re-verified independently rather than taken from the implementation report, produced: wrong amount digit → TED-Acc **0.9839** / field-F1 0.8571; item reorder with every value correct → TED-Acc **0.5161** / field-F1 1.0000; invalid JSON → 0.0 / 0.0. Two disqualifying properties followed: TED-Acc is nearly blind to a materially wrong amount (the reference tree costs 62 units from empty and a wrong amount costs 1 — 1.6% of scale, while ADR-017's `X = 0.05` is three times that error's entire cost), and because `zss` computes an **ordered** tree edit distance it penalises a pure row reorder ~30× harder than a wrong amount, on a dataset where row order is a scanning convention. The user therefore adopted **ADR-024**: the per-receipt index-free field-value multiset F1 becomes primary and the sole input to the decision rule, TED-Acc is demoted to a reported secondary, and `X = 0.05` is now in field-F1 units (unchanged in value, changed in meaning — a single wrong field costs ≈ 0.143 on the probe reference). This was decided **before any model output existed**, on fixtures frozen in advance, which is what distinguishes it from post-hoc metric selection and is exactly what ADR-009's deadline exists to guarantee. **ADR-025** splits R3-14: the loader contract plus its request-level unit test is the gate's guarantee, and the integration test over the real Phase-2 loading path becomes the first artifact written in Phase 2, passing before `02_baseline.ipynb` runs even once — half the finding is deferred with a named trigger rather than satisfied, and is recorded as such. Also corrected an error of Claude Code's own: §6.2 had claimed the empty-value rule was "confirmed by the source", but `normalize_dict` tests `if not data` **before** stripping, so a whitespace-only `"   "` survives as a leaf and still costs its parent node — measured 0.5 under TED-Acc versus 1.0 under the field metric. The evaluator is not patched (ADR-022 declined that); the divergence is characterised by a test. The audit work also surfaced five specification defects, all fixed: a wrong ESS numerator (`100²` for a 60-receipt set), the unwritten lemma that §6.4's and §8.1's graphs coincide, unpinned dHash parameters (filter/size/bit order — a different filter moves borderline pairs across the `≤ 3` line), §8.4's per-row exclusion attribution being ill-defined under propagation, and the non-independence of the three floors. **Remaining before re-review: execution, not specification** — §9 deliverables 1, 2, 5 and 8 (schema generation, token measurement, the audit run, and the four-arm VRAM gate) all require Colab. |
+| 2026-08-13 | **Built `notebooks/01a_closure_measurements.ipynb` and `notebooks/01b_vram_gate.ipynb`, plus `scripts/_vram_gate_{common,c1_save,c2_resume}.py`, then went further than structural validation: `01a` was genuinely executed** (real Hub connection, no GPU required by design) in a scratch venv with the exact pinned dependencies, editable-installed against this worktree — all 27 code cells ran with zero errors. Real results: schema 843/900 valid, `max_seq_len = 2064`, duplication audit `EVALUABLE` (81 retained test receipts, all ADR-023 floors cleared). **This execution surfaced ADR-026** (`USER DECISION REQUIRED`, open): `convert_ground_truth` does not normalize a second Donut list-collapse pattern affecting 14 scalar leaf fields on 57/900 real records, which matters because the same function builds training targets. Two defects in this session's own work were also found and fixed: the Colab revision guard (added the previous day) printed `<unknown> @ <unknown>` instead of failing loudly (`os.chdir` ran before the check), and a notebook-level schema-anomaly-exclusion helper over-excluded 896/900 records on its first implementation before being rewritten to match the schema algorithm's actual shape rules. `01b_vram_gate.ipynb` could not be executed locally (no GPU) but its loader was integration-tested against the real `configs/derived_budget.yaml` produced by `01a`. Local: 113 passed, 1 skipped; 4/4 notebooks structurally valid. Committed as `25ffd31`, pushed, draft PR #2 updated. |
+| 2026-08-14 | **The user ran both `01a_closure_measurements.ipynb` and `01b_vram_gate.ipynb` on Colab; both completed end-to-end and were pushed directly to this branch** (commits `3f3f44a`, `1a7cce4`). Verified from the committed notebook JSON, not the verbal report, per this project's established standard: 0 error outputs, every code cell executed in both. `01a` reproduced the same real numbers as the local run (843/900 schema-valid, `max_seq_len = 2064`, `EVALUABLE` duplication audit), confirming the local execution generalizes to the Colab environment, with no test-split content in any output. `01b`'s four-arm VRAM gate ran for the first time and returned **GO on all four arms** with real numbers (ADR-012's `33030144`-trainable-param / correct-prefix assertions held). **But the GPU was an `NVIDIA RTX PRO 6000 Blackwell Server Edition` (~95 GiB VRAM, compute capability 12.0), not the free-tier T4 ADR-018 pre-registered** — every arm passed with tens of GiB to spare, which validates the four-arm protocol itself but answers nothing about whether it passes on an actual 16 GiB T4. Recorded as **ADR-027** (`USER DECISION REQUIRED`, open): re-run on a real T4, formally supersede ADR-018 for a larger tier, or treat this run as non-binding. `docs/STATE.md`'s "Unresolved Open Items" list (stale since before this session's execution work) was partially reconciled inline rather than left contradicting the results recorded above; a full pass is still owed at §9 item 9 promotion. |
