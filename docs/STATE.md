@@ -56,16 +56,27 @@ This file must always reflect the latest state. Agents must always read this fil
 The user asked to proceed to Phase 2 on 2026-08-12. Phase 2 is gated, and the gate has now been run
 and **failed**. Status:
 
-- **Gate:** ADR-005 adversarial review for Phase 2 entry. **Reviewed. Verdict: BLOCK — NOT SATISFIED.**
+- **Gate:** ADR-005 adversarial review for Phase 2 entry. **Two rounds run. Both returned BLOCK — NOT
+  SATISFIED.** A third round is pending against proposal v3.
 - **Evidence:** `reviews/phase_2_adversarial.md` (Codex/Sol role, read-only, independent context, via
-  the `codex:rescue` skill; reviewed commit `f179dbd`).
+  the `codex:rescue` skill). Round 1 reviewed commit `f179dbd` (v1); round 2 reviewed `1f51cb0` (v2).
 - **Reviewed artifact:** `docs/proposals/phase1_closure_prereg.md` — a Claude-Code-authored draft
   closing the remaining Phase 1 exit conditions and completing the ADR-009 pre-registration. **Draft
   only; NOT authoritative and NOT promoted** into `EXPERIMENT_SPEC` / `EVALUATION_PROTOCOL` /
   `DECISIONS`.
-- **Findings:** 25 (17 `required`, 7 `recommended`, 1 `optional`). **All 25 dispositioned ACCEPT**;
-  no REJECT, no DEFER. Two were errors in Claude Code's own reasoning and are corrected inline in the
-  proposal (marked `[CORRECTED — F3]` and `[CORRECTED — F23]`).
+- **Round 1:** 25 findings (17 `required`). **All dispositioned ACCEPT**; no REJECT, no DEFER. Two
+  were errors in Claude Code's own reasoning (the false claim that a train↔test duplicate "inflates
+  both conditions, not one", and dismissing few-shot on optimizer-state memory that inference does not
+  hold).
+- **Round 2** (against v2): round-1 closure **CLOSED 11 / PARTIALLY CLOSED 12 / NOT CLOSED 2**, plus
+  **13 new `required`** findings. All dispositioned ACCEPT. Two of them (R2-1, R2-2) exposed a real
+  defect in how ADR-019 was *written up* — near-duplicate grouping does not remove selective training
+  leakage, and excluding rows changes the estimand out from under ADR-017's stated rationale. Fixed by
+  **ADR-021**, which amends rather than reverses the user's decision.
+- **v3** (current): resolves all 13 round-2 `required` findings under the explicit principle *freeze
+  the rule, defer only the value* — every algorithm, formula, threshold and tie-break is fixed now,
+  and only quantities that genuinely require execution are marked `TBD-MEASURED` against a named
+  deliverable.
 - **Why this matters procedurally:** `EXPERIMENT_SPEC.md` §8b puts the pre-registration deadline
   *before any performance output is observed in Phase 2* — including baseline output on a
   train/validation subset. Running `notebooks/02_baseline.ipynb` even once before promotion would
@@ -88,13 +99,18 @@ open decisions land:
 
 ## Next Actions
 
-1. **Blocked on the user — four decisions (D-1…D-4).** See "USER DECISION REQUIRED" below. D-3 and
-   D-4 in particular reshape the proposal, so revising it before they are answered would be wasted
-   work.
-2. After D-1…D-4: resolve the 17 `required` findings, re-run the ADR-005 adversarial review against
-   the revised proposal, then promote the accepted content into `EXPERIMENT_SPEC` /
-   `EVALUATION_PROTOCOL` / `IMPLEMENTATION_PLAN` / new ADRs, create `configs/*.yaml`, and only then
-   start Phase 2.
+1. **Not blocked on the user.** D-1…D-4 are decided (ADR-017…ADR-020, amended by ADR-021). The gate is
+   now blocked on specification and implementation work, not on decisions.
+2. Run ADR-005 review round 3 against proposal v3. If it passes, promote the accepted content into
+   `EXPERIMENT_SPEC` / `EVALUATION_PROTOCOL` / `IMPLEMENTATION_PLAN` / new ADRs, create
+   `configs/*.yaml`, and only then start Phase 2.
+3. **Judgement call for the user to weigh:** rounds 1 and 2 both returned BLOCK, and a growing share of
+   the remaining findings are things that are settled most reliably by *writing the code and taking the
+   measurement* rather than by another prose round — the generated JSON Schema and its fixtures, the
+   real token distributions, the duplication audit's actual clusters, and the VRAM numbers. The §9
+   deliverables now specify the rules for all of these, so an alternative to further document rounds is
+   to implement §9 items 1–8 (all Phase 1 exit conditions) and let the measured values close the
+   remaining holes.
 3. Independently of the above, these Phase 1 exit conditions still need implementation and (for the
    GPU ones) a Colab run: the ADR-008 duplication audit, the ADR-014 production-shape VRAM gate
    notebook, and a split-scoped loader so test-blindness is structurally enforced rather than left to
@@ -103,24 +119,21 @@ open decisions land:
    `notebooks/00_environment.ipynb` / `notebooks/01_dataset.ipynb` / `src/vlm_lab/data.py` /
    `tests/`, other than F5's loader change above.
 
-## USER DECISION REQUIRED (blocking the Phase 2 gate)
+## USER DECISIONS — all four RESOLVED 2026-08-12
 
-Per `AGENTS.md` §17 these are material trade-offs the orchestration layer must not resolve alone.
+The four items escalated by the Phase 2 gate review were decided by the user on 2026-08-12 and are
+recorded as ADRs with their rationale and rejected alternatives. They are no longer blockers.
 
-- **D-1 — Improvement threshold X** (pre-existing; `EXPERIMENT_SPEC.md` §8b has never fixed it).
-  Options `0.00` / `0.05` (recommended) / `0.10`. Must be chosen from what a delta *means*, not from
-  how likely it is to pass (review finding F16).
-- **D-2 — Colab tier for Phase 3–5** (pre-existing). Determines the fp16-vs-bf16 pin, the SDPA
-  backend, the image-token budget, and the whole VRAM gate — so it must be decided *before* the
-  ADR-014 gate is run, or the gate measures the wrong machine.
-- **D-3 — Duplicate-handling policy, frozen *before* the audit runs** (new; findings F3/F4/F13).
-  ADR-008 requires the policy to be pre-registered ahead of the audit. Options: deterministic
-  exclusion, group-aware split construction, or halt/downgrade the confirmatory claim. Departing from
-  ADR-007's official split needs its own ADR.
-- **D-4 — Evaluation estimand and primary metric** (new; findings F8/F9/F12). Strict verbatim
-  transcription versus semantic extraction. This single choice determines the primary metric, the
-  string-normalization rules, and the prompt wording. Best decided after the synthetic-error metric
-  probe (F8), which needs no model output and no test data.
+| ID | Decision | Recorded as |
+|---|---|---|
+| D-1 | Improvement threshold **X = 0.05** | [[DECISIONS]] ADR-017 |
+| D-2 | Run the ADR-014 VRAM gate on the **free-tier T4 first**, then decide the tier; the T4 path (fp16 load+compute, SDPA) is pinned until the measurement says otherwise | [[DECISIONS]] ADR-018 |
+| D-3 | **Exact cross-split duplicates excluded** from test; near-duplicate clusters become **group-aware bootstrap** units; policy frozen *before* the audit runs | [[DECISIONS]] ADR-019 |
+| D-4 | Estimand is **strict verbatim transcription**; TED-Acc stays primary with a mandatory per-receipt **field-exact guardrail** | [[DECISIONS]] ADR-020 |
+
+Note that ADR-019 authorises a departure from ADR-007's fixed `test = 100` count whenever an exact
+cross-split duplicate is found. That departure is deliberate and recorded, not incidental; the
+realized test count goes into the result artifacts.
 
 ## Unresolved Open Items (Blocking / Open)
 
@@ -161,3 +174,4 @@ See [[EXPERIMENT_SPEC]] §10. The following remain open and were **not** address
 | 2026-08-12 | User ran the self-heal fix. The Pillow/`_Ink` issue was resolved (no recurrence) — but a new, different, real error appeared further down the same import chain: `RuntimeError: Detected that PyTorch and TorchAudio were compiled with different CUDA versions. PyTorch has CUDA version 13.0 whereas TorchAudio has CUDA version 12.8`, raised inside `transformers.audio_utils` while `AutoProcessor.from_pretrained` probed for optional audio support. User also asked whether to change dependency versions and switch to Python 3.13. Diagnosed directly instead of guessing: `torchaudio` is not a dependency of this project at all — confirmed via `transformers`' own package metadata, it's only an optional "audio"/"all"/"dev" extra, so the plain `transformers==5.15.0` pin never installs or touches it; it's whatever Colab's base VM image ships by default, compiled against that image's own CUDA version, which no longer matches once the pinned `torch` build resolves to CUDA 13.0. Confirmed locally that `AutoProcessor` imports cleanly with torchaudio entirely absent (this project only ever processes receipt images, never audio). Declined the Python 3.13 suggestion with rationale: this bug is a compiled-CUDA-extension version mismatch between two specific packages, unrelated to the Python interpreter version, and Colab's Python version isn't something togglable via `pyproject.toml` — switching would introduce substantial new risk (uncertain wheel availability for every pin under cp313/CUDA 13.0) to fix a problem with a much smaller, already-diagnosed root cause. Fixed (commit `b0b0004`, pushed directly to `main`): both setup cells now explicitly `pip uninstall -y torchaudio` right after the main install, rather than chasing a CUDA-matched torchaudio pin for a feature never used. Outstanding: one more real Colab run to confirm the full sequence (Pillow self-heal + torchaudio removal) completes end-to-end with a working processor load. |
 | 2026-08-12 | **`COLAB PASS` achieved for both notebooks** (commits `323f8a9`, `2f596bf`), verified directly by reading the committed notebook JSON rather than the summary alone. `00_environment.ipynb`: real Tesla T4, `cuda_available: True`, CUDA 13.0, model config and **processor both loaded successfully** with no errors — the full multi-round diagnostic sequence (branch pin → self-contained setup → Pillow/torchvision drift → editable-install `.pth` timing → `sys.modules` staleness → stray `torchaudio`) is resolved. `01_dataset.ipynb`: real split sizes, images, and test-blindness all confirmed on the same real GPU run. This closes out this session's Phase 1 sub-scope (implementation + local validation + independent review + Colab GPU validation) as fully complete. The broader Phase 1 exit conditions from `IMPLEMENTATION_PLAN.md` (LoRA approval gate, VRAM go/no-go gate, duplication audit, revision pinning, metric/prompt pre-registration) remain open and were never part of this session's scope — Phase 1 as a whole is not yet complete, and Phase 2 should not start until those are addressed in a future, explicitly-scoped session. |
 | 2026-08-12 | **User asked to proceed to Phase 2; the Phase 2 entry gate was run and returned BLOCK.** First re-verified Phase 1's status directly from the committed notebook JSON (`COLAB PASS` confirmed: `in_colab: True`, `cuda_available: True`, Tesla T4 14.56 GiB, Pillow 12.3.0 matching the pin, `Qwen3VLProcessor` loaded; `01_dataset.ipynb` full pass with test handled mechanically only). Established the facts that need no design judgement by reading the live Hub rather than recalling them: ADR-015 commit SHAs for model and dataset; ADR-012's real fully-qualified module names from `model.safetensors.index.json` (vision tower uses fused `attn.qkv`, so none of the seven selected projection basenames collides); the r=16 adapter parameter count 33,030,144; and a previously unrecorded hard constraint — the model ships bfloat16 but T4 (sm_75) has no bf16 support, so fp16 must be pinned. Drafted `docs/proposals/phase1_closure_prereg.md` covering all remaining Phase 1 exit conditions plus the ADR-009 pre-registration (commit `f179dbd`), then ran the mandatory ADR-005 adversarial review on it (Codex/Sol role, read-only, independent context). **Verdict: BLOCK.** 25 findings (17 `required`); **all 25 dispositioned ACCEPT, none rejected or deferred** — the review is technically sound throughout and caught two outright errors in Claude Code's own reasoning: the claim that a train↔test duplicate "inflates both conditions, not one" (false — only the Fine-tuned condition trained on it, so leakage shows up directly in Δ), and the use of optimizer-state memory to dismiss few-shot (inference retains no optimizer). Both are corrected inline in the proposal with the original text struck through so the error stays traceable. Review evidence persisted at `reviews/phase_2_adversarial.md`. Two new `USER DECISION REQUIRED` items were created by the review (D-3 duplicate-handling policy, which ADR-008 requires frozen *before* the audit runs; D-4 the evaluation estimand and primary metric), joining the two pre-existing ones (D-1 threshold X, D-2 Colab tier). Nothing was promoted into the source-of-truth documents and `02_baseline.ipynb` was not executed — doing so would breach `EXPERIMENT_SPEC.md` §8b's pre-registration deadline. Phase 2 remains not started. |
+| 2026-08-13 | **Phase 2 gate round 2 (v2) returned BLOCK; ADR-021 recorded; proposal revised to v3.** The user decided all four escalated items, recorded as ADR-017 (X = 0.05), ADR-018 (measure the VRAM gate on the free T4 first, then decide the tier; fp16 + SDPA pinned meanwhile), ADR-019 (exclude exact cross-split duplicates, group near-duplicates for the bootstrap, policy frozen before the audit) and ADR-020 (strict verbatim estimand, TED-Acc primary plus a field-exact companion). Proposal v2 resolved all 25 round-1 findings and was re-reviewed. **Round 2 verdict: BLOCK.** Round-1 closure was CLOSED 11 / PARTIALLY CLOSED 12 / NOT CLOSED 2, with 13 new `required` findings, all dispositioned ACCEPT. Round 2 confirmed several v2 claims by independent check (the PEFT regex is a valid full-match that rejects the vision tower; the 252.0 MiB fp32 Adam moment figure is exactly right; `paged_adamw_8bit` is valid on T4). Two round-2 findings exposed a genuine defect in how ADR-019 had been *written up*, not in the user's decision: converting near-duplicates into bootstrap clusters addresses dependence among evaluated receipts but not the bias from the Fine-tuned model having trained on a near-copy the Base model never saw; and excluding rows silently changed the estimand out from under ADR-017's "resolvable at n=100" rationale. Recorded **ADR-021**, which amends ADR-019 with a relation-specific exclusion table (train↔test and validation↔test near matches are now excluded, not merely clustered; clustering is reserved for within-test dependence), names the reduced estimand explicitly, narrows ADR-007's fixed test=100 count, and pre-registers a `NOT EVALUABLE` floor of 60 retained receipts / 40 clusters. Proposal v3 resolves all 13 round-2 findings under the stated principle *freeze the rule, defer only the value*: the cluster-construction and bootstrap-replicate algorithms, the field-exact formula, the JSON-Schema construction algorithm and its validator fixtures, the four-case test-rerun policy, the real `transformers==5.15.0` `TrainingArguments` field names (v2 used three that do not exist in the pinned runtime), the corrected VRAM measurement protocol (v2's GO inequality compared a process allocator peak against global free memory, which double-counts), the shared-input-object equality guarantee including `pixel_values`, the joint token-budget measurement, and three capability-separated loader entry points. Review evidence for both rounds is in `reviews/phase_2_adversarial.md`. Nothing promoted into the source-of-truth documents; `02_baseline.ipynb` still not executed. |

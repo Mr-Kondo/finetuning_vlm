@@ -440,3 +440,80 @@ The estimand is **strict verbatim transcription**: the model must reproduce the 
 - `EVALUATION_PROTOCOL.md` §5.1's normalization rules and `EXPERIMENT_SPEC.md` §4's prompt wording must be aligned to this estimand when the pre-registration is promoted.
 - ADR-017's `X = 0.05` is expressed in TED-Acc units.
 - The secondary field-exact metric is a reported guardrail, not part of the ADR-017 decision rule.
+
+---
+
+## ADR-021: Amend ADR-019 — Relation-Specific Leakage Actions, the Reduced Estimand, and a NOT EVALUABLE Floor
+
+- **Date:** 2026-08-13
+- **Status:** Accepted
+- **Amends:** ADR-019 (does not reverse the user's decision; closes gaps in how it was written up)
+- **Narrows:** ADR-007 (the fixed `test = 100` count is no longer inviolable — see Consequences)
+- **Trigger:** `reviews/phase_2_adversarial.md` Round 2, Findings R2-1 and R2-2 (Codex adversarial re-review). ACCEPT.
+
+**Context:**
+ADR-019 recorded the user's decision to exclude exact cross-split duplicates and to make
+near-duplicate clusters the bootstrap resampling unit. The round-2 adversarial review found two
+defects in that write-up — in Claude Code's drafting, not in the user's decision:
+
+1. **Cluster resampling and leakage handling are different problems.** Grouping a near-duplicate for
+   resampling addresses *dependence among evaluated receipts*. It does nothing about *bias in the
+   point estimate* caused by the Fine-tuned model having trained on a near-copy that the Base model
+   never saw. A train↔test cluster containing a single test row is a singleton to the bootstrap while
+   its Fine-tuned score may still be selectively inflated — exactly the leakage ADR-019 set out to
+   eliminate.
+2. **Excluding rows changes the estimand.** Once exact duplicates are removed, the decision rule no
+   longer concerns CORD v2's official 100-row test split but a subset of unknown size whose removal is
+   non-random (it preferentially removes template-repetitive receipts). ADR-017 nonetheless justified
+   `X = 0.05` partly as "resolvable at `n = 100`", which is no longer the population being measured.
+
+**Decision:**
+
+1. **Relation-specific actions, frozen before the audit runs.** The action depends on which splits the
+   match spans, not only on whether it is exact:
+
+   | Relation | Exact match | Near match (dHash cluster) |
+   |---|---|---|
+   | `train` ↔ `test` | **excluded from test** | **excluded from test** — this is training exposure, not merely dependence |
+   | `validation` ↔ `test` | **excluded from test** | **excluded from test** — validation drives prompt and checkpoint selection |
+   | `train` ↔ `validation` | **excluded from validation** | **excluded from validation** — otherwise selection is made on effectively-seen data |
+   | `test` ↔ `test` (within split) | n/a | **retained**, and this is the *only* relation handled by cluster resampling |
+
+   Cluster resampling is therefore reserved for residual within-test dependence and is no longer used
+   as a substitute for leakage handling.
+
+2. **The estimand is named explicitly.** The confirmatory claim is about
+   **"CORD v2 test receipts with no exact or near duplicate in train or validation"**, not about the
+   official 100-row split. Every report must state this. Results on the full official 100 rows may be
+   reported **only** as a clearly-labelled non-confirmatory diagnostic.
+
+3. **`NOT EVALUABLE` floor, pre-registered.** If the retained test set falls below **60 receipts** or
+   **40 independent within-test clusters**, the confirmatory comparison is declared `NOT EVALUABLE`
+   and no improvement claim is made. This is fixed here, before the audit, so the floor cannot be
+   chosen once the retained count is known.
+
+4. **ADR-017's rationale is corrected.** `X = 0.05` stands as the user's decision. Its written
+   justification is amended from "resolvable at `n = 100`" to "resolvable at the retained sample size,
+   subject to the `NOT EVALUABLE` floor above". The threshold value is unchanged.
+
+**Alternatives Considered:**
+- Excluding exact matches only and leaving near matches to clustering (ADR-019 as originally written):
+  rejected, because it leaves the selective-leakage channel open, which was the whole reason the user
+  chose the exclusion option.
+- Retaining near matches with a sensitivity analysis instead of excluding them: would preserve the
+  official split size, but makes the primary claim contingent on a secondary analysis; rejected as
+  less clear than excluding up front.
+- Reverting to report-only: rejected — the user explicitly chose against it, and finding F3 established
+  that report-only leaves the leakage in the primary comparison.
+
+**Consequences:**
+- ADR-007's `test = 100` / `validation = 100` counts are **no longer inviolable**. This ADR narrows
+  ADR-007 for the confirmatory analysis only; the underlying official split is not re-partitioned, and
+  the realized counts plus the exclusion manifest are recorded in the result artifacts.
+- Excluding train↔validation matches from validation changes the checkpoint-selection set, so the
+  realized validation size must also be recorded.
+- `EVALUATION_PROTOCOL.md` §3 and §6 must record the reduced estimand, the exclusion table, and the
+  `NOT EVALUABLE` floor when the pre-registration is promoted.
+- Because exclusion is non-random, the Phase 6 report must state that the conclusion does not
+  generalize to receipts resembling the training set — which is the honest scope of a held-out claim
+  anyway.

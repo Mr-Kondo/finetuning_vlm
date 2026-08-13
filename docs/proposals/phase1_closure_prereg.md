@@ -1,4 +1,4 @@
-# Phase 1 Closure and Phase 2 Pre-Registration — PROPOSAL (DRAFT v2)
+# Phase 1 Closure and Phase 2 Pre-Registration — PROPOSAL (DRAFT v3)
 
 > **THIS DOCUMENT IS NOT AUTHORITATIVE.**
 > It is a *proposal* to close the remaining Phase 1 exit conditions in
@@ -14,10 +14,22 @@
 
 ## Revision history
 
-**v1 → v2.** v1 was reviewed adversarially on 2026-08-12 (`reviews/phase_2_adversarial.md`, Codex/Sol
-role, read-only). Verdict **BLOCK**: 25 findings (17 `required`), all dispositioned **ACCEPT**. v2
-resolves every one of them and incorporates the four user decisions now recorded as ADR-017 through
-ADR-020. Findings are cited inline as `[F<n>]` so each resolution is traceable to what prompted it.
+**Governing principle from v3 onward: freeze the RULE, defer only the VALUE.** The round-2 review
+correctly distinguished a legitimately deferred *measurement* (e.g. the exact p95 image-token count,
+which needs a GPU) from a *pre-registration hole* (a decision rule that could still be chosen after
+results are seen). Everywhere below, the rule, algorithm, formula, threshold and tie-break are fixed
+here; only quantities that require execution are marked `TBD-MEASURED`, and each names the deliverable
+that produces it.
+
+**v2 → v3.** v2 was re-reviewed on 2026-08-12/13 (`reviews/phase_2_adversarial.md`, Round 2). Verdict
+again **BLOCK**, with round-1 closure **CLOSED 11 / PARTIAL 12 / NOT CLOSED 2** and **13 new
+`required`** findings, all dispositioned ACCEPT. v3 resolves them, cited inline as `[R2-n]`. Two
+round-2 findings exposed real defects in how ADR-019 was drafted — near-duplicate grouping does not
+remove selective training leakage, and excluding rows changes the estimand — now fixed by **ADR-021**.
+
+**v1 → v2.** v1 was reviewed adversarially on 2026-08-12. Verdict **BLOCK**: 25 findings (17
+`required`), all dispositioned **ACCEPT**. v2 resolved them and incorporated the four user decisions
+recorded as ADR-017 through ADR-020. Findings cited inline as `[F<n>]`.
 
 Two of v1's own claims were **wrong** and are called out here rather than quietly dropped:
 
@@ -195,16 +207,27 @@ processor_size:
   longest_edge:  1_048_576     # <= 1024 merged image tokens
   shortest_edge:   200_704     # >=  196 merged image tokens
 
-# Step 2 — measured, not assumed [F18]: from the pinned processor's real image_grid_thw,
-# dividing spatial patches by merge_size**2. NOT from pixel-area arithmetic.
-measured_image_tokens:   {p50: TBD, p95: TBD, max: TBD}
-measured_prompt_tokens:  {max: TBD}       # fully rendered chat template, not the bare string
-measured_target_tokens:  {p50: TBD, p95: TBD, max: TBD}
+# Step 2 — measured on the JOINT sequence, never by summing independent maxima [R2-11].
+# Four distinct quantities, defined so they cannot double-count each other:
+#   eval_prefix_len   = final processor output input_ids.shape[-1] for the evaluation message.
+#                       This ALREADY contains the expanded image placeholder tokens.
+#   train_seq_len     = input_ids.shape[-1] after constructing prefix + assistant target + EOS.
+#   assistant_label_n = count of positions with label != -100 in that training sequence.
+#   image_token_n     = prod(image_grid_thw) / merge_size**2, reported separately for the VRAM
+#                       gate only — NOT an addend in the budget below [F18].
+eval_prefix_len:    {p50: TBD-MEASURED, p95: TBD-MEASURED, max: TBD-MEASURED}
+train_seq_len:      {p50: TBD-MEASURED, p95: TBD-MEASURED, max: TBD-MEASURED}
+assistant_label_n:  {p50: TBD-MEASURED, p95: TBD-MEASURED, max: TBD-MEASURED}
+image_token_n:      {p50: TBD-MEASURED, p95: TBD-MEASURED, max: TBD-MEASURED}
 
-# Step 3 — derived
-max_new_tokens: ceil(measured_target_tokens.max * 1.25)
-max_seq_len:    measured_image_tokens.max + measured_prompt_tokens.max + max_new_tokens + 64
+# Step 3 — derived by fixed formula from the joint measurements above
+max_new_tokens: ceil(assistant_label_n.max * 1.25)
+max_seq_len:    max(train_seq_len.max, eval_prefix_len.max + max_new_tokens)
 ```
+
+**Assertion:** `max_seq_len` must not exceed the pinned model's maximum context; the gate fails loudly
+if it does. `TBD-MEASURED` values come from §9 deliverable 2 and are frozen into `configs/*.yaml`
+before Phase 2; the *formulas* above are frozen now and may not change after any result is seen.
 
 **Hard assertions, all failing loudly `[F2]`:** zero training-target truncations; EOS present on every
 training target; zero silent input truncations; the generation termination reason recorded per sample
@@ -263,17 +286,28 @@ entirely when it is not present:
   "menuqty_cnt", "menutype_cnt".
 - "void_menu": voided items, same structure as "menu".
 
-Transcribe every value exactly as printed on the receipt, character for character. Preserve digit
-grouping such as "58,000" or "23.000", currency symbols, capitalization, and spacing exactly as
-shown. Do not convert, round, reformat, translate, or tidy any value. Do not invent fields that
-are not visible on the receipt.
+Transcribe every value exactly as printed on the receipt. Preserve digit grouping such as
+"58,000" or "23.000", currency symbols, capitalization, and internal spacing exactly as shown.
+Do not convert, round, reformat, translate, or tidy any value. Leading and trailing spaces around
+a value do not matter. Do not invent fields that are not visible on the receipt.
 
 Return only the JSON object.
 ```
 
+**`[R2-5]` The estimand is "trimmed verbatim transcription", not literal character-for-character.**
+v2's prompt demanded spacing "character for character" while scoring stripped leading/trailing
+whitespace — and vendored Donut's own `normalize_dict` strips scalar strings and drops empty values,
+so literal character-for-character scoring is not achievable through the pinned evaluator at all. The
+prompt above is corrected to match what is actually scored, and the estimand is renamed accordingly
+throughout. ADR-020's substance is unchanged; only its name and this wording were inaccurate.
+
+**Empty-string treatment, frozen `[R2-5]`:** a leaf whose value is `""` after trimming is treated as
+**absent**, on both the prediction and reference sides, matching the vendored evaluator's behaviour.
+This is stated here rather than inherited silently.
+
 The key inventory is provisional and must be verified mechanically against **train + validation only**
 (never `test` — ADR-008); if any key outside it occurs, the template is corrected before the
-pre-registration is frozen (§9 item 1). The wording is aligned to ADR-020's verbatim estimand.
+pre-registration is frozen (§9 item 1).
 
 ### 5.4 P-10b — The complete input freeze `[F1]`
 
@@ -316,13 +350,36 @@ output_decoding:
   clean_up_tokenization_spaces: false
 ```
 
-**Assertion, run before evaluation begins `[F1]` `[F22]`:** for every sample, the Base and Fine-tuned
-paths produce byte-identical input token IDs, attention masks and `image_grid_thw`, and structurally
-identical resolved `GenerationConfig` and processor configuration. The **only** permitted difference is
-the adapter state. v1's "no condition-dependent branch anywhere" was an impossible criterion `[F22]`;
-the accurate rule is a one-item allowlist plus a structured diff of everything else. Implementation
-preference: one quantized base instance with the PEFT adapter enabled/disabled, so the two conditions
-cannot diverge by construction.
+**Exact training-sequence construction, frozen `[R2-10]`:** v2 described it in prose ("same prefix,
+then appends the assistant turn + EOS"), which is not an algorithm. The frozen procedure is:
+
+1. Build the message list `[system, user(image, text)]` and render it with `add_generation_prompt=true`
+   to obtain the **evaluation prefix**; process it to get `prefix_features`.
+2. Build `[system, user(image, text), assistant(target_json)]`, render with
+   `add_generation_prompt=false`, append the tokenizer's EOS, and process it to get `full_features`.
+3. `labels = full_features.input_ids.clone()`; set `labels[: prefix_features.input_ids.shape[-1]] = -100`.
+   Every position at or before the prefix boundary — which includes all image-token positions — is
+   masked, and only the assistant target plus EOS carries loss (§3.5).
+4. Assert `full_features.input_ids[: prefix_len] == prefix_features.input_ids` element-wise, so the
+   prefix boundary is verified rather than assumed.
+
+An equivalence test must confirm this render-then-process path produces the same tensors as the
+processor's own `apply_chat_template(..., tokenize=True, return_dict=True)` path; if it does not, the
+processor's own path wins and this construction is corrected `[R2-10]`.
+
+**Input-equality guarantee `[F1]` `[F22]` `[R2-10]`:** the two conditions **share one precomputed
+input object** — the features are built once per sample and passed to both, so divergence is
+impossible by construction rather than detected after the fact. As a belt-and-braces check, assert
+equality of the **complete `BatchFeature`**: the full key set, and per key the shape, dtype and a
+content hash — explicitly including `pixel_values` and any position-related fields, not just
+`input_ids` / `attention_mask` / `image_grid_thw` (two preprocessors can yield the same grid shape
+with different normalized pixel tensors). Also assert structurally identical resolved
+`GenerationConfig` and processor configuration.
+
+The **only** permitted difference is the adapter state. v1's "no condition-dependent branch anywhere"
+was an impossible criterion `[F22]`; the accurate rule is a one-item allowlist plus a structured diff
+of everything else. Implementation: one quantized base instance with the PEFT adapter
+enabled/disabled.
 
 ---
 
@@ -330,18 +387,44 @@ cannot diverge by construction.
 
 ### 6.1 P-11 — Metrics (ADR-020)
 
-- **Primary:** TED-Acc, per receipt.
-- **Mandatory secondary guardrail:** per-receipt **field-exact-match** score, reported with its own
-  paired CI. Its job is to expose TED-Acc's insensitivity to single-character amount errors
+- **Primary:** TED-Acc, per receipt. Sole input to the ADR-017 decision rule.
+- **Mandatory diagnostic:** per-receipt **field-exact score**, defined below, reported with its own
+  paired cluster CI. `[R2-4]` v2 called this a "guardrail", but ADR-020 deliberately makes it
+  non-binding — a metric that cannot block a TED-Acc pass is a diagnostic, and calling it a guardrail
+  overstated it. Its job is to make TED-Acc's insensitivity to single-character amount errors visible
   (`58,000` vs `59,000` costs one character edit but is a materially wrong amount) `[F8]`.
 - Also reported: raw JSON validity, recoverable-payload parse rate, strict schema validity, micro-F1,
   Exact Match.
 
-**P-11b — synthetic-error probe, before any model output exists `[F8]`.** Both candidate metrics are
-scored on constructed cases — wrong amount digit, missing field, extra field, item reorder, invalid
-JSON, near-correct OCR — and the resulting table is transcribed into `EVALUATION_PROTOCOL.md` §5.1.
-This needs no model and no test data, and it converts "TED-Acc is appropriate" from an assertion into
-evidence.
+**P-11a — field-exact score, fully defined `[R2-4]`.** For one receipt:
+
+1. Flatten both the prediction and the reference into a **multiset** of `(path, value)` pairs, where
+   `path` is the dotted key path with **array indices replaced by `[]`** (so `menu[0].nm` and
+   `menu[3].nm` share the path `menu[].nm`). Using a multiset with index-free paths makes the score
+   invariant to menu-row ordering while still counting multiplicity — two identical rows contribute
+   two pairs.
+2. Apply §6.3's trimmed-verbatim normalization to `value`; drop pairs whose value is empty after
+   trimming (consistent with §5.3's empty-string rule).
+3. `TP = |pred ∩ ref|` as a **multiset intersection** (so duplicate rows must be duplicated correctly
+   to earn credit); `FP = |pred| − TP`; `FN = |ref| − TP`.
+4. `field_exact_i = 2·TP / (2·TP + FP + FN)`, i.e. per-receipt F1 over exact pairs. Defined as `1.0`
+   when both multisets are empty, and `0.0` when exactly one is empty or the output failed to parse.
+
+This is per-receipt and additive, so it has a well-defined paired `Δ_i` and its own CI under the §6.4
+bootstrap — unlike corpus micro-F1 `[F12]`.
+
+**P-11b — synthetic-error probe: characterization only, with a defined consequence `[R2-4]`.** Before
+any model output exists, both metrics are scored on constructed cases — wrong amount digit, missing
+field, extra field, item reorder, invalid JSON, near-correct OCR — and the table is transcribed into
+`EVALUATION_PROTOCOL.md` §5.1.
+
+Its status is **characterization, not a selection procedure**: it documents how each metric responds,
+and it **cannot** change the primary metric on its own, because ADR-020 already fixed that and a
+metric chosen from probe behaviour after the fact would be a post-hoc selection. The single defined
+consequence: if the probe shows TED-Acc assigning **≥ 0.95** to a case with a wrong amount digit, that
+fact is recorded prominently in `EVALUATION_PROTOCOL.md` §5.1 and in the Phase 6 report as a stated
+limitation of the primary metric, and a change of primary metric is escalated as a **new
+`USER DECISION REQUIRED`** — resolved before Phase 2 runs, never after results are seen.
 
 ### 6.2 P-12 — Donut evaluator, vendored and pinned `[F11]`
 
@@ -371,7 +454,8 @@ whole thing a custom pipeline whose differences must be documented. Requirements
 | Parse failure | Scores 0 on TED-Acc, field-exact, F1 and Exact Match. Never dropped from the denominator (ADR-011). |
 | Non-object top level | Parse failure. |
 | Strict schema validity `[F7]` | Checked against the §6.5 schema, reported separately from raw validity. A parseable but schema-invalid object still receives content credit; that is stated explicitly rather than left implicit. |
-| String normalization (ADR-020) | **Strip leading/trailing whitespace only.** No NFKC, no case folding, no internal-whitespace collapse, no digit-grouping or currency normalization. v1's NFKC + whitespace collapse contradicted the prompt's verbatim instruction `[F9]`. |
+| String normalization (ADR-020, **trimmed verbatim**) | **Strip leading/trailing whitespace only.** No NFKC, no case folding, no internal-whitespace collapse, no digit-grouping or currency normalization. v1's NFKC + collapse contradicted the verbatim instruction `[F9]`; v2's prompt still overclaimed "character for character" while scoring trimmed `[R2-5]`. Both prompt and estimand name are now aligned to what is actually computed. |
+| Empty values `[R2-5]` | A leaf that is `""` after trimming counts as **absent** on both sides, matching the vendored evaluator's `normalize_dict`. Frozen here rather than inherited silently. |
 | Missing vs. null | Absent key and key-present-with-`null` are treated as identical on both sides. |
 | Empty prediction `{}` | Raw-valid JSON; scores near 0; counted valid. |
 | Micro-F1 `[F12]` | Global micro-F1 over flattened field–value pairs (Donut's definition). It has no additive per-sample score, so it is **incompatible with the `mean(Δ_i)` construction** — not impossible to bootstrap. If a CI is wanted, use a paired receipt-level **cluster** bootstrap that recomputes the corpus statistic per replicate. |
@@ -384,15 +468,44 @@ bootstrap_B: 10000
 bootstrap_method: percentile
 bootstrap_ci: 0.95
 bootstrap_seed: 20260812
-bootstrap_unit: duplication_cluster   # ADR-019 group-aware; singleton receipts are their own cluster
+bootstrap_unit: within_test_cluster   # see the algorithm below
+bootstrap_weighting: receipt_weighted
+min_retained_receipts: 60             # ADR-021 NOT EVALUABLE floor
+min_independent_clusters: 40          # ADR-021 NOT EVALUABLE floor
 ```
 
-**Group-aware resampling `[F13]`:** i.i.d. receipt-level resampling would be invalid if the test set
-contains near-duplicate template clusters — correlated receipts counted as independent evidence narrow
-the CI and inflate the false "improvement achieved" rate. Per ADR-019 the resampling unit is the
-duplication cluster from the frozen audit. If the audit finds no multi-member clusters, every cluster
-is a singleton and this degenerates exactly to the ordinary paired receipt bootstrap; that evidence is
-recorded either way.
+**Cluster construction algorithm, fully specified `[R2-3]`.** v2 said "dHash ≤ 3, forming clusters",
+which is not reproducible: Hamming adjacency is not transitive, so connected-components and
+complete-linkage disagree, and it was unstated which signals contribute edges.
+
+1. **Vertices:** the receipts of the **retained test set** — i.e. *after* ADR-021's cross-split
+   exclusions have been applied. Clustering is therefore about residual **within-test** dependence
+   only; cross-split leakage is handled by exclusion, never by clustering `[R2-1]`.
+2. **Edges:** an undirected edge joins two test receipts when **either** their decoded-pixel hashes
+   are equal (§8.1), **or** their dHash Hamming distance is `≤ 3`, **or** their value-inclusive
+   canonical ground-truth hashes are equal. The **type-only template signature contributes no edges**
+   — it would collapse many independent receipts into a few enormous clusters and is reported
+   separately as template evidence only `[R2-3]`.
+3. **Linkage:** **connected components** of that graph. Chosen over complete-linkage because it is
+   deterministic, order-independent, and conservative (it never splits a genuinely dependent pair).
+4. **Ordering:** exclusions are applied first, then the graph is built **once** over the retained set
+   and never recomputed.
+5. **Effective sample size:** `ESS = (Σ_c n_c)² / Σ_c n_c²` over cluster sizes `n_c` (Kish's formula).
+   Reported alongside the retained receipt count. Purely descriptive — the decision rule uses the CI.
+
+**Replicate algorithm, fully specified `[R2-3]`.** For each of `B = 10000` replicates: draw `K`
+clusters **with replacement**, where `K` is the number of clusters in the retained set; concatenate
+all receipts of the drawn clusters (so a large cluster contributes all its rows every time it is
+drawn); compute the **receipt-weighted** mean of `Δ_i` over that concatenation. Receipt-weighted
+rather than cluster-weighted so the statistic estimates the same quantity as the point estimate, which
+is the plain mean over retained receipts. The 95% percentile interval is taken over the `B` means.
+
+If every cluster is a singleton, this degenerates exactly to the ordinary paired receipt bootstrap;
+that evidence is recorded either way `[F13]`.
+
+**`NOT EVALUABLE` floor (ADR-021):** if the retained set has fewer than 60 receipts or fewer than 40
+clusters, the confirmatory comparison is declared `NOT EVALUABLE` and no improvement claim is made.
+Fixed before the audit so it cannot be chosen once the counts are known.
 
 **Percentile over BCa `[F24]`:** chosen for transparency and implementation simplicity — one fewer
 thing that can be silently wrong in the statistic the conclusion hinges on. v1's claim that BCa's
@@ -402,19 +515,43 @@ trade-off is recorded honestly as a simplicity choice.
 
 ### 6.5 P-14b — Normative output schema `[F7]`
 
-A key inventory is not a schema. Frozen from **train + validation only**, before Phase 2:
+A key inventory is not a schema. `[R2-6]` v2 also contradicted itself — "unknown keys permitted
+structurally" and "unknown keys are a schema violation" cannot both hold in one JSON Schema. The fix
+is that there are **two separate paths**, and each is unambiguous:
 
-- The recursive structure: allowed top-level keys; which are objects, which are arrays of objects;
-  the permitted keys at each level including nested `sub`.
-- Value types: all leaves are **strings** in CORD's ground truth; a numeric leaf in a prediction is a
-  schema violation (though the value may still match after Donut's stringification — hence the
-  separate strict-validity report).
-- Unknown keys: permitted structurally but counted as false positives by the field metrics, and
-  recorded as a schema violation.
-- Scalar-vs-list shape for `menu` / `void_menu` / `sub`: always lists after `convert_ground_truth`;
-  a bare object in a prediction is a schema violation.
+| Path | Behaviour on an unknown key |
+|---|---|
+| **Strict schema validation** (`additionalProperties: false`) | invalid; contributes to the strict-validity rate |
+| **Content metrics** (TED-Acc, field-exact, micro-F1) | tolerated structurally; the unknown pair simply counts as a false positive |
 
-Expressed as an explicit JSON-Schema document under `configs/` so it is machine-checkable, not prose.
+Strict validity is *reported*, never a gate on content scoring — so a parseable but schema-invalid
+object still receives content credit, and that fact is now explicit rather than emergent.
+
+**Deterministic construction algorithm, frozen now; the schema document itself is generated by it
+`[R2-6]`.** Run over the **union of train + validation** converted ground truths (never `test`):
+
+1. **Draft:** JSON Schema **2020-12**. Validator: `jsonschema` (Python), pinned with an exact `==`
+   version and recorded in the artifact.
+2. **Root:** `type: object`, `additionalProperties: false`, `required: []` — every top-level key is
+   optional, because §5.3's prompt instructs omission of absent keys.
+3. **Property set at each level:** exactly the keys observed at that path in the corpus. No key is
+   added by judgement and none is dropped for rarity.
+4. **Shape at each path:** if the normalized corpus value is always a list of objects → `type: array`,
+   `items: {type: object, additionalProperties: false, ...}` recursed. If always an object → `type:
+   object` recursed. Otherwise → leaf.
+5. **Leaf type:** `type: string`. All CORD leaves are strings after `convert_ground_truth`; a numeric
+   leaf in a prediction is therefore a strict-schema violation, even though Donut's stringification may
+   still let its value match on content.
+6. **Nulls:** not permitted (`null` is never emitted by `convert_ground_truth`); a `null` leaf is a
+   strict violation and, per §6.3, is treated as *absent* for content scoring.
+7. **Empty arrays:** permitted (`minItems` is not set).
+8. The generated document is written to `configs/cord_v2_output.schema.json`, **hashed**, and the hash
+   recorded in every result artifact.
+
+**Validator fixtures, frozen `[R2-6]`:** the generated schema must reject — unknown key, numeric leaf,
+`null` leaf, a bare object where an array is required — and must accept — a minimal single-`menu`-item
+receipt, an empty array, and every train+validation reference. These fixtures are committed and run in
+CI, so a later schema regeneration cannot silently change meaning.
 
 ### 6.6 P-15 — Seed
 
@@ -428,24 +565,39 @@ seed: 42            # LoRA init, data ordering, any sampling; single seed per AD
 
 ### 7.1 Decision rule (ADR-017)
 
-`X = 0.05`, on TED-Acc, against `CI_lower(Δ) ≥ X` from the §6.4 group-aware paired bootstrap.
-Regression is `CI_upper(Δ) < 0`. Field-exact is reported alongside as a guardrail but is **not** part
-of the decision rule (ADR-020).
+`X = 0.05`, on TED-Acc, against `CI_lower(Δ) ≥ X` from the §6.4 cluster bootstrap. Regression is
+`CI_upper(Δ) < 0`. Field-exact is reported alongside as a **diagnostic** and is **not** part of the
+decision rule (ADR-020, `[R2-4]`).
+
+**Estimand (ADR-021, `[R2-2]`):** the confirmatory claim concerns **"CORD v2 test receipts with no
+exact or near duplicate in train or validation"** — not the official 100-row split, since ADR-019's
+exclusions are non-random and preferentially remove template-repetitive receipts. Every report must
+state this. Results over the full official 100 rows may appear **only** as a clearly-labelled
+non-confirmatory diagnostic. If the retained set falls below the §6.4 floor, the result is
+`NOT EVALUABLE`. ADR-017's threshold value is unchanged; only its written "resolvable at n=100"
+rationale was stale and is amended by ADR-021.
 
 ### 7.2 P-16 — Test-execution budget `[F6]`
 
 **One** execution, in Phase 5, covering both conditions in the same run.
 
-- **Infrastructure/artifact failure** (runtime disconnect, crash, corrupted or incomplete artifact) —
-  the only condition permitting a rerun, and only as an **exact-config replay**.
+`[R2-13]` v2 said infrastructure failure was "the only condition permitting a rerun" and then
+immediately permitted a corrected-config rerun for code defects — a contradiction that would allow
+test-driven correction. The policy is now **four disjoint cases, distinguished by how much test
+information has escaped**:
+
+| # | Situation | Policy |
+|---|---|---|
+| 1 | **Infrastructure/artifact failure** (runtime disconnect, crash, corrupted or incomplete artifact) — no output observed | **Exact-config replay.** Nothing about the run's config or code may change. |
+| 2 | **Startup defect before any test example is processed** (e.g. a config fails validation, the model fails to load) | Fix, then run. No test data has been touched, so this is not a test execution at all. Recorded in `docs/STATE.md`. |
+| 3 | **Code/config defect discovered after test examples were processed but while outputs are still sealed** | The run is voided and the sealed outputs are **destroyed unread**. The defect, its evidence and the corrected config are recorded in `docs/STATE.md` *before* the rerun. |
+| 4 | **Defect discovered after any output, metric or test-dependent failure detail has been observed** | The confirmatory claim is **invalidated**. A rerun does not restore it. Continuing requires a **new ADR and an explicit user decision**, and any subsequent result is reported as non-confirmatory. |
+
 - **Generation-length termination** (outputs reaching `max_new_tokens`) is model behaviour, **not** a
-  defect, and never grounds for a rerun or a larger cap.
-- **Code/config defect discovered mid-run**: the run is voided, the defect and its evidence are
-  recorded in `docs/STATE.md` *before* any rerun, and the rerun uses the corrected config recorded in
-  advance.
+  defect, and never grounds for a rerun or a larger cap — under any of the four cases.
 - Outputs stay **sealed** until both conditions and the artifact-integrity checks have completed, so a
   Base-complete / Fine-tuned-failed run cannot expose Base test results during debugging.
-- Every attempted test-split access is logged.
+- Every attempted test-split access is logged (§8.3).
 
 ### 7.3 P-17 — Search space and split roles `[F14]` `[F15]`
 
@@ -459,7 +611,12 @@ search_space:
 max_trials: 4                        # full 2x2 grid; no adaptive search, no extra rounds
 
 # --- fixed [F14] ---
-optimizer: paged_adamw_8bit          # bitsandbytes; chosen for T4 memory headroom (ADR-018)
+# Trainer contract [R2-7]: transformers.Trainer with transformers.TrainingArguments from the
+# pinned transformers==5.15.0, plus a project-owned multimodal collator. NOT SFTTrainer.
+# Field names below are the pinned runtime's actual TrainingArguments names; v2 used
+# `optimizer`, `dataloader_shuffle_seed` and the removed `group_by_length`, none of which exist.
+# `packing` was also a different layer's concept and is dropped.
+optim: paged_adamw_8bit              # valid in transformers 5.15; bitsandbytes supports it on T4
 adam_beta1: 0.9
 adam_beta2: 0.999
 adam_epsilon: 1e-8
@@ -470,20 +627,46 @@ warmup_ratio: 0.03
 per_device_train_batch_size: 1
 gradient_accumulation_steps: 8       # effective batch 8
 gradient_checkpointing: true
+gradient_checkpointing_kwargs: {use_reentrant: false}
 per_device_eval_batch_size: 1
-packing: false
-group_by_length: false
-dataloader_shuffle_seed: 42
+data_seed: 42                        # sampler/data ordering
+seed: 42
 save_strategy: epoch
 eval_strategy: epoch
+save_total_limit: null               # keep every epoch checkpoint; selection is explicit (§7.4)
+load_best_model_at_end: false        # selection is done explicitly, not by the trainer
+remove_unused_columns: false         # REQUIRED: the collator consumes non-tensor image columns
 fp16: true
 bf16: false
+report_to: []
 ```
 
-**Split roles, stated unambiguously `[F15]`:** every trial **fits only on `train`**; `validation` is
-**evaluation-only and never updates weights**; `test` is untouched until Phase 5. The selected
-configuration is **not** retrained afterwards — the selected checkpoint is used directly, so no
-post-selection refit can leak validation information.
+Additionally frozen outside `TrainingArguments` `[R2-7]`:
+
+- **Collator:** a project-owned multimodal collator in `src/vlm_lab/training.py` that performs the
+  §5.4 construction per sample and stacks a single-example batch. Named and unit-tested, not implicit.
+- **`model.config.use_cache = False` during training** (mandatory with gradient checkpointing).
+- **Config loading rejects unknown keys** — an unrecognized YAML key is an error, not a silent no-op,
+  so a field name that does not exist in the pinned runtime cannot pass unnoticed (which is exactly
+  how v2's three wrong names survived).
+- The **fully resolved** `TrainingArguments` are serialized into the run artifact.
+
+**Split roles, stated unambiguously `[F15]`:** `validation` is **evaluation-only and never updates
+weights**; `test` is untouched until Phase 5.
+
+**Trial and final-artifact provenance, frozen `[R2-8]`:** all four grid trials fit on the **full
+800-row `train` split** using `qwen_cord_full`; the selected checkpoint is used directly as the
+Fine-tuned artifact, with **no retraining after selection**. Consequently:
+
+- `qwen_cord_mini`'s role is narrowed to **pre-grid smoke iteration only** (fast bug detection); it
+  produces **no** artifact that can become the final model, and its results never feed selection.
+  `IMPLEMENTATION_PLAN.md`'s configs table must be corrected accordingly, along with its existing
+  self-contradiction about whether mini references validation or train+validation `[F15]`.
+- v2 also justified "no retraining" by claiming a post-selection refit would "leak validation
+  information". That was too broad and is withdrawn `[R2-8]` — validation-guided selection is the
+  intended design. The actual reason is simpler: training all four trials on full train means the
+  selected checkpoint is already trained on everything it would be retrained on, so a refit would add
+  cost and a second seed-dependent artifact for no benefit.
 
 **Pre-existing documentation defect to fix `[F15]`:** `IMPLEMENTATION_PLAN.md` contradicts itself —
 Phase 4's description says `qwen_cord_mini` "references only the validation split", while the configs
@@ -531,9 +714,22 @@ audit runs**; the audit executes it, it does not choose it `[F3]`.
 selection, so a validation↔test duplicate is also contamination), and `train`↔`validation` (selection
 bias).
 
-**Actions (ADR-019):** exact cross-split duplicates are excluded from the test evaluation set;
-near-duplicate clusters become the §6.4 bootstrap resampling units; exclusion counts, cluster
-structure and the resulting effective sample size are always reported.
+**Actions (ADR-021, superseding ADR-019's original wording) `[R2-1]`.** v2 excluded only *exact*
+cross-split duplicates and demoted near matches to bootstrap clusters. That conflated two different
+problems: clustering fixes dependence among evaluated receipts, but does nothing about **bias in the
+point estimate** from the Fine-tuned model having trained on a near-copy the Base model never saw.
+The action is therefore relation-specific:
+
+| Relation | Exact match | Near match (dHash ≤ 3) |
+|---|---|---|
+| `train` ↔ `test` | excluded from test | **excluded from test** |
+| `validation` ↔ `test` | excluded from test | **excluded from test** |
+| `train` ↔ `validation` | excluded from validation | **excluded from validation** |
+| `test` ↔ `test` | n/a | **retained** — the only relation the §6.4 cluster bootstrap handles |
+
+Exclusion counts, the retained receipt and cluster counts, the effective sample size, and the realized
+validation size are always reported — including when nothing is excluded. If the retained test set
+falls below §6.4's floor, the result is `NOT EVALUABLE`.
 
 **Test blindness `[F4]`:** the audit publishes **aggregate counts and a frozen automated verdict
 only** — never hashes, pair IDs, or candidate renderings, because a test-side hash can be joined
@@ -550,14 +746,31 @@ unsupported margin. Replaced by **four separately-measured arms**:
 |---|---|
 | A — Load | model load + NF4 quantization; realized dtypes per module; realized SDPA backend `[F20]` |
 | B — Train | forward + backward + `optimizer.step()` across a **full accumulation window** (8 microbatches) with the exact §7.3 optimizer, at production shape, gradient checkpointing on |
-| C — Checkpoint | adapter save **and reload**, since ADR-018's T4 path makes resume-from-checkpoint load-bearing |
-| D — Eval | Base **and** Fine-tuned generation at maximum input + maximum output length, including KV cache |
+| C — Resume | a genuine **save → destroy process → reload → one further optimizer step** cycle, covering adapter, optimizer state, scheduler, grad scaler, RNG state and dataloader position — not merely adapter save/reload `[R2-9]` |
+| D — Eval | Base **and** Fine-tuned generation with the decode length **forced to the full configured `max_new_tokens`** (`min_new_tokens = max_new_tokens`, EOS suppressed) at maximum input length, so the KV cache actually reaches its worst case rather than stopping early at EOS `[R2-9]` |
 
-Each arm reports `max_memory_allocated`, `max_memory_reserved`, and **device free/total** after
-warm-up. **GO criterion:** every arm's peak reserved memory fits within the **measured free memory of
-the actual device**, with the residual reported rather than assumed. Scale reference: fp32 Adam
-moments for 33,030,144 parameters are ~252 MiB before gradients, master weights, activations and
-allocator effects — which is why the optimizer is now pinned (§7.3) rather than left unspecified.
+**Measurement protocol, corrected `[R2-9]`.** v1 used an unsupported 13.0 GiB constant; v2 replaced it
+with an invalid inequality — `max_memory_reserved()` is *this process's* allocator peak, while
+`mem_get_info()` free memory is global and time-dependent, so comparing the peak against free memory
+sampled later double-counts the process's own allocation. The protocol is now:
+
+1. Each arm runs in a **fresh process**, so no earlier arm's allocator state carries over.
+2. Immediately after CUDA init and before any model allocation, record
+   `baseline_free, total = torch.cuda.mem_get_info()`. `baseline_free` is the budget for that arm.
+3. Call `torch.cuda.reset_peak_memory_stats()` at the start of the measured region, and
+   `torch.cuda.synchronize()` before reading any statistic.
+4. Report `max_memory_allocated`, `max_memory_reserved`, and `total − min_free_observed`
+   (a periodically sampled global low-water mark that also captures non-PyTorch allocations).
+5. **GO criterion:** `max_memory_reserved ≤ baseline_free − 1.0 GiB` for every arm, where the 1.0 GiB
+   is a **pre-registered fixed safety margin** for allocator fragmentation and driver overhead — a
+   stated constant, not a residual inferred after the fact.
+6. Because `paged_adamw_8bit` can silently fall back to CUDA unified-memory paging under pressure,
+   arm B additionally reports per-step wall time; a step-time blow-up with apparently-fitting memory
+   is recorded as a **soft NO-GO** `[R2-9]`.
+
+Scale reference: fp32 Adam moments for 33,030,144 parameters are `33,030,144 × 2 × 4 = 252.0 MiB`
+before gradients, master weights, activations and allocator effects — which is why the optimizer is
+pinned in §7.3 rather than left unspecified.
 
 The gate also produces:
 
@@ -573,10 +786,26 @@ NO-GO triggers the §4 fallback ladder, a re-run, and re-recording — all befor
 ### 8.3 P-21 — Structurally enforced test blindness `[F5]`
 
 `load_cord_v2()` returns a `DatasetDict` containing all three splits, so "Phase 2 does not read test"
-currently depends on caller discipline, and a caller can materialize test before deciding not to index
-it. Required change: a **split-scoped loader** (explicit allowed-splits argument) that **fails closed**
-on `"test"`, with Phase 2 requesting only `train`/`validation`, plus a unit test asserting no
-test-split request is issued.
+depends on caller discipline. `[R2-12]` v2's "explicit allowed-splits argument" was no better: a
+parameter the caller supplies is a parameter the caller can set to `"test"`.
+
+**Three separately-named entry points, with capability baked into the function, not into an
+argument:**
+
+| API | Splits reachable | Used by |
+|---|---|---|
+| `load_development_splits()` | `train`, `validation` **only** — has *no parameter capable of naming test* | Phases 1–4, including `02_baseline.ipynb` |
+| `load_for_duplication_audit()` | all three, but returns **hashes and counts only**, never images or ground-truth content (§8.1) | the ADR-008/ADR-019 audit |
+| `load_sealed_test_split()` | `test` | Phase 5 only |
+
+`load_for_duplication_audit()` and `load_sealed_test_split()` **log every invocation** (timestamp,
+caller module, git commit) to an append-only access log committed with the results, so
+`EXPERIMENT_SPEC.md` §8b's "one test execution" is auditable rather than asserted.
+
+**Test asserts on the request, not the return value `[R2-12]`:** the unit test patches the loading
+boundary and asserts that the *split argument actually sent to the Hub* from
+`load_development_splits()` never contains `"test"` — checking the returned object would pass even if
+test had already been downloaded.
 
 ### 8.4 P-22 — Per-sample evidence artifact `[F17]`
 
@@ -587,6 +816,21 @@ termination reason, raw-validity and recoverable-parse status, parsed object, re
 every per-sample metric, exception state, duplication-cluster ID, and config/artifact hashes.
 
 **Assert one-to-one Base / Fine-tuned / reference alignment before bootstrapping.**
+
+**Identity and immutability, specified `[R2-14]`** — v2 called the artifact "immutable" without saying
+what made it so:
+
+- **Format:** versioned **JSONL**, one record per `(condition, receipt)`, with a `schema_version` field
+  and a header record naming it.
+- **Unique key:** `(dataset_revision, split, row_index, condition)`. Asserted unique on write; the
+  record count is asserted equal to `2 × retained_receipts`.
+- **Write semantics:** written to a temporary path, then **content-addressed** — the file is hashed and
+  renamed to include its hash, and the hash is recorded in `metrics.json`. Rewriting produces a
+  different filename rather than mutating a file in place.
+- **Exclusion manifest `[R2-14]`:** evaluated-row records alone cannot prove the *right* rows were
+  excluded, so a separate sealed manifest lists every excluded row ID, the relation that caused it
+  (`train↔test` exact, `validation↔test` near, …) and the cluster ID, plus its own hash. Sealed until
+  Phase 5 completes; before then only aggregate counts are published (§8.1 test blindness).
 
 ---
 
@@ -648,8 +892,29 @@ performance output before the pre-registration exists.
 | P-21 | Split-scoped, fail-closed loader | proposal |
 | P-22 | Per-sample evidence artifact + alignment assertion | proposal |
 
-**All four previously-open user decisions are now closed** by ADR-017 through ADR-020.
+**All four previously-open user decisions are closed** by ADR-017 through ADR-020, with ADR-021
+amending ADR-019's write-up (not the decision) to close the leakage hole round 2 found.
 
-**Gate status:** ADR-005 adversarial review of **v2** — PENDING. v1's review returned BLOCK
-(`reviews/phase_2_adversarial.md`); this revision resolves all 25 findings. v2 must not be promoted,
-and `02_baseline.ipynb` must not be executed, until the re-review passes.
+### What v3 changed, by round-2 finding
+
+| Finding | Resolution in v3 |
+|---|---|
+| R2-1 near-duplicate leakage | ADR-021: relation-specific exclusion table; clustering now covers *within-test* dependence only (§8.1, §6.4) |
+| R2-2 estimand / `n=100` | ADR-021: estimand named explicitly; ADR-007 narrowed; `NOT EVALUABLE` floor; stale rationale amended (§7.1) |
+| R2-3 cluster algorithm | Vertices, edge signals, connected-component linkage, ordering, ESS formula, replicate procedure, receipt weighting — all frozen (§6.4) |
+| R2-4 field-exact | Full formula (index-free path multiset, multiset intersection, per-receipt F1); renamed a **diagnostic**; probe given characterization-only status with a defined escalation (§6.1) |
+| R2-5 verbatim conflict | Estimand renamed **trimmed verbatim**; prompt aligned; empty-string rule frozen (§5.3, §6.3) |
+| R2-6 JSON Schema | Two explicit paths for unknown keys; deterministic construction algorithm; draft/validator pinned; fixtures frozen (§6.5) |
+| R2-7 training config | Real `transformers==5.15.0` field names (`optim`, `data_seed`); `group_by_length`/`packing` dropped; trainer, collator, `use_cache`, checkpoint semantics named; unknown YAML keys rejected (§7.3) |
+| R2-8 provenance | All four trials on full `train`; mini narrowed to smoke iteration; the over-broad "refit leaks validation" claim withdrawn (§7.3) |
+| R2-9 VRAM inequality | Fresh process per arm, `baseline_free` budget, peak reset, synchronized reads, fixed 1.0 GiB margin, real resume cycle, forced full decode, paging soft-NO-GO (§8.2) |
+| R2-10 input freeze | One shared precomputed input object; full `BatchFeature` equality incl. `pixel_values`; exact training-sequence construction with a verified prefix boundary (§5.4) |
+| R2-11 token budget | Four non-overlapping measured quantities; `max_seq_len` from joint sequence maxima, not summed components (§4) |
+| R2-12 loader | Three capability-separated entry points; Phase 2's cannot name test; logged test access; test asserts on the request (§8.3) |
+| R2-13 rerun policy | Four disjoint cases by how much test information escaped; case 4 invalidates the confirmatory claim (§7.2) |
+| R2-14 artifact | Versioned JSONL, unique key, content-addressed writes, sealed exclusion manifest (§8.4) |
+| R2-15 STATE | `docs/STATE.md` made internally consistent during this integration pass |
+
+**Gate status:** ADR-005 adversarial review of **v3** — PENDING. Rounds 1 and 2 both returned BLOCK
+(`reviews/phase_2_adversarial.md`); round 2 closed 11 of 25 round-1 findings outright. v3 must not be
+promoted, and `02_baseline.ipynb` must not be executed, until a review passes.

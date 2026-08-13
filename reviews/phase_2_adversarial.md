@@ -335,3 +335,201 @@ The proposal must not be promoted into `docs/EXPERIMENT_SPEC.md` /
 `docs/EVALUATION_PROTOCOL.md` / `docs/DECISIONS.md`, and `notebooks/02_baseline.ipynb` must not be
 executed, until the `required` findings are resolved, the duplicate policy is frozen ahead of the
 audit, the pre-registration is complete, and D-1 through D-4 are decided by the user.
+
+---
+
+# Round 2 — Re-review of proposal v2
+
+- **Review date:** 2026-08-12
+- **Reviewed state:** commit `1f51cb0` (proposal v2 + ADR-017…ADR-020)
+- **Review model:** Codex (GPT-5.6 Sol role), read-only, independent context
+- **Scope:** (1) verify closure of each round-1 finding; (2) adversarially review v2's new material
+  (§4 token budget, §5.4 input freeze, §6.4 group-aware bootstrap, §6.5 schema, §7.3 training config,
+  §8.2 four-arm VRAM gate, §8.3 loader, §8.4 evidence artifact) and the four new ADRs.
+
+## Overall outcome
+
+**BLOCK — the ADR-005 gate is still NOT satisfied.**
+
+Round-1 closure: **CLOSED 11 · PARTIALLY CLOSED 12 · NOT CLOSED 2.**
+New round-2 findings: **13 `required`, 2 `recommended`.**
+
+The reviewer's framing: v2 filled in most of the missing *field names*, but the duplicate-data bias,
+the statistic, and the runtime configuration are still not specified uniquely enough — so analysis
+conditions could still move after results are seen. Explicitly **not** a request to reverse any of
+the four user decisions; a requirement to specify their consequences operationally.
+
+## Round-1 closure table
+
+| Finding | Status | Gap remaining |
+|---|---|---|
+| F1 input freeze | PARTIAL | omits `pixel_values` / full processor output set; training-template construction not exact |
+| F2 token budget | PARTIAL | prompt/image token semantics can double-count; joint sequence is not the measured statistic |
+| F3 duplicates | **NOT CLOSED** | near train↔test exposure only grouped, not excluded — selective Fine-tuned leakage remains |
+| F4 hash leakage | CLOSED | |
+| F5 loader | PARTIAL | caller-supplied allowlist is not a structural authorization boundary |
+| F6 rerun policy | PARTIAL | "only condition" contradicted by the corrected-config rerun clause |
+| F7 schema | PARTIAL | schema still deferred; unknown-key handling self-contradictory |
+| F8 metric alignment | PARTIAL | field-exact undefined; probe has no acceptance criterion or consequence |
+| F9 verbatim | PARTIAL | "character for character" still conflicts with edge-whitespace stripping |
+| F10 fence recovery | CLOSED | |
+| F11 Donut pin | PARTIAL | SHA/versions/transcription/fixtures still §9 deliverables |
+| F12 micro-F1 wording | CLOSED | |
+| F13 group bootstrap | **NOT CLOSED** | cluster construction, weighting, within-test clustering, replicate statistic all undefined |
+| F14 training config | PARTIAL | several keys do not exist in the pinned runtime; trainer/collator contract open |
+| F15 split roles | PARTIAL | mini/full provenance ambiguous; plan contradiction not yet fixed |
+| F16 completeness | PARTIAL | decisions recorded and forecasts removed; schema/tokens/pins/VRAM still open |
+| F17 per-sample artifact | CLOSED | |
+| F18 image tokens | CLOSED | |
+| F19 module claims | CLOSED | |
+| F20 realized path | CLOSED | |
+| F21 VRAM gate | PARTIAL | GO inequality invalid; resume incomplete; max decode not guaranteed |
+| F22 allowlist | CLOSED | |
+| F23 few-shot rationale | CLOSED | |
+| F24 percentile | CLOSED | |
+| F25 vision hypothesis | CLOSED | |
+
+## Round-2 findings and dispositions
+
+All 15 are **ACCEPT**. Again no REJECT and no DEFER — each was checked against the v2 text and none
+was found to be technically wrong. Two of them (R2-1, R2-2) identify a real defect in ADR-019 as
+Claude Code drafted it, i.e. in how the *user's decision was written up*, not in the decision itself.
+
+**R2-1 — Near-duplicate grouping does not remove selective training leakage.** `required`
+Excluding exact duplicates but merely *clustering* near-duplicates conflates two different problems.
+Cluster resampling fixes dependence among evaluated receipts; it does nothing about bias in the point
+estimate caused by the Fine-tuned model having trained on a near-copy the Base model never saw. A
+train↔test cluster containing one test row is still a singleton to the bootstrap, while its
+Fine-tuned score may be selectively inflated.
+→ **ACCEPT.** ADR-019's written policy has a leakage hole. Relation-specific actions must be frozen:
+what happens to train↔test and validation↔test *near* matches, separately from within-test
+dependence. Addressed by ADR-021.
+
+**R2-2 — ADR-019 changes the estimand and invalidates ADR-017's `n=100` rationale.** `required`
+Once exact duplicates are excluded, the decision rule is no longer about CORD v2's official 100-row
+test split but about a subset of unknown size whose exclusion is non-random (it likely removes the
+more template-repetitive receipts). ADR-017 nevertheless justified `X = 0.05` as "resolvable at
+n=100". ADR-019 also departs from ADR-007 without saying it supersedes or amends it.
+→ **ACCEPT.** Requires naming the reduced estimand explicitly, amending ADR-007's relationship,
+pre-registering a `NOT EVALUABLE` floor on retained rows/clusters, and removing the stale `n=100`
+justification. Addressed by ADR-021.
+
+**R2-3 — Clusters and the cluster bootstrap are not operationally defined.** `required`
+"dHash ≤ 3 forming clusters" is not an algorithm: Hamming adjacency is not transitive, so
+connected-components and complete-linkage give different answers; which signals contribute edges is
+unstated; a type-only template signature could collapse many independent receipts into a few huge
+clusters; test↔test dependence is not covered; and the replicate procedure, cluster-vs-receipt
+weighting, unequal cluster sizes and "effective sample size" have no definitions.
+→ **ACCEPT.** Fully specified in v3 §6.4/§8.1.
+
+**R2-4 — Field-exact is neither defined nor actually a guardrail.** `required`
+No formula (repeated menu rows need a deterministic matching rule; multiplicity, missing/extra
+fields, reordering, nulls, aggregation all undefined), and ADR-020 makes it explicitly non-binding —
+a metric that cannot prevent a TED-Acc pass is a diagnostic, not a guardrail. The synthetic probe
+also has no acceptance criterion and no defined consequence.
+→ **ACCEPT.** Define the metric; rename it a **mandatory diagnostic** to match ADR-020's non-binding
+decision rather than overclaiming; give the probe an explicit "characterization only" status.
+
+**R2-5 — "Strict verbatim" still conflicts with the scoring normalization.** `required`
+The prompt demands spacing "character for character" while scoring strips leading/trailing
+whitespace — and vendored Donut's `normalize_dict` itself strips scalar strings and drops empty
+values, so vendoring cannot deliver literal character-for-character scoring.
+→ **ACCEPT.** Rename the estimand **trimmed verbatim transcription**, align the prompt, and freeze
+empty-string treatment explicitly. ADR-020's substance is unchanged; its name and prompt were
+inaccurate.
+
+**R2-6 — §6.5 is still not a normative JSON Schema.** `required`
+"Unknown keys permitted structurally" and "unknown keys are a schema violation" cannot both hold in
+ordinary JSON Schema. Draft version, validator, `additionalProperties`, requiredness, null handling
+and reference-validation rules are unspecified, and those cannot be chosen after inspecting the
+inventory without a deterministic construction rule.
+→ **ACCEPT.** Freeze a deterministic construction algorithm plus validator fixtures.
+
+**R2-7 — The "complete training configuration" does not map to the pinned runtime.** `required`
+`optimizer`, `dataloader_shuffle_seed` and `group_by_length` are not `transformers==5.15.0`
+`TrainingArguments` fields (`optim`, `data_seed`, `train_sampling_strategy` are); `packing` belongs to
+a different layer; and the trainer class, multimodal collator, `remove_unused_columns`, training
+`use_cache`, gradient-checkpointing kwargs and best-checkpoint loading are never named.
+→ **ACCEPT.** A concrete, checkable defect. Note the reviewer explicitly cleared `paged_adamw_8bit`
+itself as valid and T4-supported — the defect is the config contract, not the optimizer.
+
+**R2-8 — Mini/full training and final-checkpoint provenance are ambiguous.** `required`
+Whether the four trials run on a train subset or all 800 rows is unstated. If the grid runs under
+`qwen_cord_mini` and the selected checkpoint is used directly, the final model was never trained on
+full train; if all four use 800 rows, the mini config's advertised role is obsolete. v2's claim that
+retraining after validation selection would "leak validation information" was also too broad.
+→ **ACCEPT**, including the correction to that over-broad claim.
+
+**R2-9 — The VRAM GO criterion compares incompatible quantities.** `required`
+`max_memory_reserved()` is the current process's allocator peak; `mem_get_info()` free memory is
+global and time-dependent. Comparing the peak against later free memory double-counts the process's
+own allocation. Peaks are also not reset between arms; arm C tests adapter save/reload rather than a
+real Trainer resume with optimizer/scheduler/scaler/RNG/dataloader position; arm D may hit EOS before
+exercising maximum cache length; and paged optimizers can silently start unified-memory paging.
+→ **ACCEPT.** v2 replaced v1's wrong constant with a wrong inequality; both are fixed in v3.
+
+**R2-10 — The "complete input freeze" does not compare the complete VLM input.** `required`
+The assertion covers token IDs, masks and `image_grid_thw` but not `pixel_values` or the rest of the
+processor output; two preprocessors can produce the same grid shape with different pixel tensors. The
+training construction is described in prose ("same prefix, then appends the assistant turn + EOS")
+rather than as an exact call and slicing algorithm.
+→ **ACCEPT.** Compare the full `BatchFeature`, or better, reuse one precomputed input object for both
+conditions so divergence is impossible by construction.
+
+**R2-11 — The token-budget formula can double-count visual tokens.** `required`
+If `measured_prompt_tokens` is the processor's final `input_ids` length it already contains the
+expanded image placeholders, so adding `measured_image_tokens` inflates the budget; if it is
+text-only, "fully rendered" is misleading. Summing independent maxima is also not the same as
+measuring real joint sequences.
+→ **ACCEPT.** Measure the joint sequence directly.
+
+**R2-12 — The loader remains caller-controlled rather than fail-closed.** `required`
+An "allowed-splits argument" still lets the caller choose. v2 also never says how the duplication
+audit and Phase 5 obtain their legitimate test access while Phase 2 fails closed.
+→ **ACCEPT.** Separate, separately-named, logged entry points; assert on the *request*, not the
+returned object.
+
+**R2-13 — Rerun rules are contradictory and permit test-driven correction.** `required`
+"The only condition permitting a rerun" is immediately followed by a corrected-config rerun clause. A
+corrected config is not an exact replay, and if any test-dependent failure information was exposed,
+test data has entered debugging.
+→ **ACCEPT.** Four disjoint cases with distinct policies, the last invalidating the confirmatory
+claim rather than silently authorizing a corrected rerun.
+
+**R2-14 — The evidence artifact's identity and immutability are undefined.** `recommended`
+After ADR-019 exclusions, evaluated-row artifacts alone cannot prove the correct rows were excluded;
+and a mutable JSON file is not immutable because the document says so.
+→ **ACCEPT.** Versioned JSONL schema, unique key, content-addressed output, sealed exclusion manifest.
+
+**R2-15 — Repository state is internally inconsistent.** `recommended`
+At `1f51cb0`, `docs/STATE.md` still described all four decisions as unresolved; the working tree's
+partial update left the header and Next Actions contradicting the lower section.
+→ **ACCEPT.** Fixed during this integration pass; STATE now states D-1…D-4 resolved, round-2 verdict
+BLOCK, and the remaining required work.
+
+## Sound as designed (round 2)
+
+Verified by the reviewer and recorded so they are not re-litigated:
+
+- The PEFT regex is a valid full-match against the real module keys and correctly rejects the vision
+  tower.
+- `33,030,144 × 2 × 4 = 264,241,152 B = 252.0 MiB` — v2's fp32 Adam moment figure is exactly right.
+- `paged_adamw_8bit` exists in Transformers 5.15 and is supported on T4-class hardware.
+- `padding: false` is consistent with microbatch size 1; gradient accumulation does not concatenate
+  the eight variable-length microbatches.
+- `cache_implementation: static` is supported by the pinned generation API and is not inherently
+  incompatible with variable-length input at batch size 1 (exact Qwen/T4 behaviour still an execution
+  check; reviewer confidence 0.78 here).
+- The processor's total-pixel `longest_edge`/`shortest_edge` keys and the move to real
+  `image_grid_thw` measurement are correct.
+- The one-base-instance, adapter-enable/disable comparison is structurally strong.
+- Percentile bootstrap as an explicitly acknowledged simplicity choice is defensible.
+
+## Gate status after round 2
+
+**ADR-005 adversarial review for Phase 2 entry: BLOCK — still NOT SATISFIED.**
+
+Minimum blockers named by the reviewer: freeze a defensible near-duplicate and cluster-bootstrap
+policy; reconcile ADR-017/ADR-019 with the reduced estimand; fully specify the metrics and schema;
+correct the training and VRAM configuration contracts; complete the VLM input/token freeze and the
+test-access boundary.
