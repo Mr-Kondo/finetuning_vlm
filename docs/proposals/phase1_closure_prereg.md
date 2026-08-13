@@ -1064,12 +1064,31 @@ training construction (R3-2), generative validation under a named callback inste
 evaluator and dependency pins that were choices rather than measurements (R3-9), and the terminology
 contradictions (R3-15, via ADR-022).
 
-**Still open from round 3:** R3-3 (hidden-test input upper bound), R3-4 (one cross-split graph
-algorithm), R3-5 (validation floor), R3-6 (ESS floor / stop implying resolvability), R3-7
-(heterogeneous-shape gate failure), R3-11 (telemetry allowlist for rerun case 3), R3-12 (global
-free-memory condition), R3-13 (timing threshold, arm D against an initialized adapter, two-process
-resume), R3-14 (Phase-5-only sealed module + integration test), and R3-9's remaining item (freezing
-the exact synthetic-probe fixtures).
+**Closed since that list was written** (by the implementation work, verified by tests):
+**R3-7** — §6.5's algorithm now fails loudly on heterogeneous or unsupported shapes and
+`vlm_lab.schema` raises `SchemaShapeError` naming the path, covered by 8 dedicated tests; and
+**R3-14 in part** — the sealed loader lives in its own module and the audit path in a third, with
+`vlm_lab.data` importing neither.
+
+**Still open from round 3, with what each actually needs:**
+
+| Finding | What it needs | Blocked on |
+|---|---|---|
+| R3-3 hidden-test input upper bound | a formula derived from the processor cap, not the observed max | nothing — specification |
+| R3-4 one cross-split graph algorithm | pin whether exclusion propagates through connected components across splits | nothing — specification |
+| R3-5 validation floor | a minimum retained validation count and its consequence | nothing — specification |
+| R3-6 ESS floor | relabel 60/40 as a stability safeguard and add an ESS floor | nothing — specification |
+| R3-9 (remainder) probe fixtures | the exact synthetic JSON/reference pairs, frozen | nothing — specification |
+| R3-11 telemetry allowlist | define which failure telemetry is test-independent | nothing — specification |
+| R3-12 global free-memory condition | add `min_free_observed` alongside the allocator inequality | nothing — specification |
+| R3-13 VRAM gate decision rules | timing statistic and threshold, arm D against an *initialized* adapter, two-process resume protocol | nothing to specify; the **numbers** need the gate to run |
+| R3-14 (remainder) Phase-2 integration test | a test that the real Phase-2 loading path issues no test request | **`02_baseline.ipynb` does not exist yet** — and cannot, before the gate passes |
+
+R3-14's remainder is a genuine circularity in the process as designed: the test that proves Phase 2
+never requests the test split cannot be written until Phase 2 code exists, but Phase 2 code may not
+be written until the gate passes. The resolution is to treat the *loader contract plus its
+request-level unit test* as the pre-registered guarantee, and the integration test as a Phase 2
+entry-criterion rather than a Phase 1 exit criterion.
 
 This document must not be promoted, and `02_baseline.ipynb` must not be executed, until a review
 passes.
