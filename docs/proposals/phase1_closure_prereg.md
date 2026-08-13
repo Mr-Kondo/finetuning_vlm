@@ -386,9 +386,23 @@ then appends the assistant turn + EOS"), which is not an algorithm. The frozen p
    masked, and only the assistant target plus its single terminator carries loss (§3.5).
 4. Assert `full_features.input_ids[: prefix_len] == prefix_features.input_ids` element-wise, so the
    prefix boundary is verified rather than assumed.
-5. **Assert exactly one terminal EOS**: `input_ids[-1] == eos_token_id` and `input_ids[:-1]` contains
-   no `eos_token_id` beyond those the template legitimately emits for the system/user turns (counted
-   from the prefix, so the assistant turn contributes exactly one).
+5. **Assert the exact terminal pair**: `input_ids[-2] == eos_token_id` and `input_ids[-1] == 198`
+   (the pinned tokenizer's newline token, `"Ċ"`), and `input_ids[:-2]` contains no `eos_token_id`
+   beyond those the template legitimately emits for the system/user turns (counted from the prefix,
+   so the assistant turn contributes exactly one).
+
+   > **`[CORRECTED]`** The wording above through v3.2 said `input_ids[-1] == eos_token_id` — wrong for
+   > the real pinned template, and caught only once a notebook implementing it literally was written
+   > and independently checked against the actual template rather than trusted on its wording.
+   > `chat_template.json`'s assistant branch renders `'<|im_end|>\n'` — a trailing literal newline
+   > after every turn's closing tag, including the last one — and that string does **not** collapse
+   > to one token: encoding it with the pinned `tokenizer.json` (verified directly with the
+   > lightweight `tokenizers` library, no `transformers`/`torch` needed) gives `[151645, 198]` in
+   > every case tried, empty object included. So `eos_token_id` (151645) sits at **position `-2`**,
+   > with the constant template token `198` last. Rule 3 above is unaffected — masking only the
+   > prefix leaves this trailing pair unmasked along with the rest of the target, which is fine, since
+   > both tokens are part of completing the turn correctly and the pair is a fixed constant with no
+   > dependence on receipt content.
 
 **The canonical call is frozen, not conditional `[R3-2]`.** Both steps use the processor's own
 `apply_chat_template(..., tokenize=True, return_dict=True, return_tensors="pt")`. v3's earlier
@@ -1222,15 +1236,41 @@ what made it so:
 
 Items 1–4 are mechanical and touch train/validation only (ADR-008-safe).
 
-1. **Schema inventory and normative JSON Schema** (§5.3, §6.5) from train + validation.
+1. **Schema inventory and normative JSON Schema** (§5.3, §6.5) from train + validation. **Executed
+   for real, 2026-08-13** (`notebooks/01a_closure_measurements.ipynb`, real Hub connection, no
+   fabrication): 843/900 (93.7%) of the corpus validates cleanly against the generated
+   `configs/cord_v2_output.schema.json`. **Blocked on ADR-026 (`USER DECISION REQUIRED`)**: execution
+   found a second, previously-undiscovered Donut list-collapse pattern affecting 14 scalar leaf paths
+   on 57/900 records (≈6.3%) that `convert_ground_truth` does not yet normalize — see ADR-026 for the
+   full finding, why it also affects training targets, and the options awaiting a decision. The
+   current schema/round-trip artifacts are the *evidence* for that decision, not the final
+   pre-registration input; regeneration is required once ADR-026 is resolved.
 2. **Token distributions** (§4) from the processor's real `image_grid_thw`; derive `max_new_tokens`
-   and `max_seq_len`.
-3. **Donut evaluator transcription** (§6.2 req. 2) plus the frozen regression fixtures.
-4. **Synthetic-error metric probe** (§6.1 P-11b) and its results table.
-5. **Duplication audit implemented and run** (§8.1), executing ADR-019's frozen policy.
-6. **Split-scoped loader** (§8.3) with its test.
-7. **Environment pins and lock artifact** (§7.5).
+   and `max_seq_len`. **Executed for real, 2026-08-13**, over all 900 train+validation samples with
+   the §5.4 step-4/step-5 assertions holding for every one:
+   `fixed_prompt_and_template_tokens = 321` (confirmed constant across all 900), giving
+   `eval_prefix_upper_bound = 1345`, `max_new_tokens = 719`, `max_seq_len = 2064` — well under the
+   pinned model's `max_position_embeddings = 262144`. Written to `configs/derived_budget.yaml`. Not
+   blocked by ADR-026 (the token-budget formulas do not depend on scalar-vs-list leaf shapes).
+3. **Donut evaluator transcription** (§6.2 req. 2) plus the frozen regression fixtures. Transcription
+   done (§6.2); the vendored `src/vlm_lab/third_party/donut_eval.py` and its regression fixtures were
+   implemented and tested (see `tests/test_evaluation.py`).
+4. **Synthetic-error metric probe** (§6.1 P-11b) and its results table. **Executed**; see §6.1 above
+   for the results and ADR-024, the primary-metric decision it produced.
+5. **Duplication audit implemented and run** (§8.1), executing ADR-019/ADR-023's frozen policy.
+   **Executed for real, 2026-08-13**, over the full 900+100 receipts across all three splits:
+   **`EVALUABLE`** — 81 retained test receipts (19 excluded), 81 independent test clusters,
+   effective sample size 81.0, 81 retained validation receipts (19 excluded); all four ADR-023 floors
+   passed with room to spare (floors are 60/40/50.0/60). `results/duplication_audit_public.json`
+   committed; the sealed per-receipt manifest (38 lines) stays local-only per `.gitignore`, never
+   printed. Not blocked by ADR-026 (duplication hashing does not depend on scalar leaf shapes).
+6. **Split-scoped loader** (§8.3) with its test. **Done** (`src/vlm_lab/{data,sealed_test,mechanical_access}.py`, `tests/test_{data,sealed_test,mechanical_access}.py`).
+7. **Environment pins and lock artifact** (§7.5). Pins done; the resolved lock artifact is not yet
+   produced — remains open.
 8. **VRAM gate executed on T4** (§8.2), yielding GO/NO-GO plus the ADR-012 approval evidence.
+   `notebooks/01b_vram_gate.ipynb` is implemented and consumes `configs/derived_budget.yaml` (now
+   available from item 2's real run); **execution requires an actual Colab T4 GPU**, which is not
+   available in the environment that ran items 1, 2 and 5 above. Remains open.
 9. **Promotion:** accepted content merged into `EXPERIMENT_SPEC.md` §4/§5/§8b/§10,
    `EVALUATION_PROTOCOL.md` §5.1/§6, `IMPLEMENTATION_PLAN.md` (including the §7.3 contradiction fix),
    and new ADRs; `configs/qwen_cord_{smoke,mini,full}.yaml` created; `docs/STATE.md` updated.

@@ -1,0 +1,2 @@
+{"timestamp_utc": "2026-08-13T13:48:04.964098+00:00", "function": "load_all_splits_for_mechanical_check", "caller_module": "__main__", "git_commit": "4cf5ba0ab8cf71b420e9e924c0267105d3774f71", "purpose": "adr-008-duplication-audit"}
+{"timestamp_utc": "2026-08-13T14:20:14.551894+00:00", "function": "load_all_splits_for_mechanical_check", "caller_module": "__main__", "git_commit": "4cf5ba0ab8cf71b420e9e924c0267105d3774f71", "purpose": "adr-008-duplication-audit"}

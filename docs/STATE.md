@@ -1,12 +1,12 @@
 # STATE.md — Current State
 
-**Last updated:** 2026-08-13 (Phase 2 entry gate: 3 review rounds, all BLOCK; D-1…D-4 decided; proposal at v3.1)
+**Last updated:** 2026-08-13 (§9 schema/token-budget/duplication-audit deliverables executed for real against the live CORD v2 corpus; new `USER DECISION REQUIRED` — ADR-026 — found by that execution)
 
 This file must always reflect the latest state. Agents must always read this file before starting work in this repository ([[CLAUDE]] / [[AGENTS]]).
 
 ## Current Phase
 
-**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: the additional exit conditions in `IMPLEMENTATION_PLAN.md` remain OPEN, and the Phase 2 entry gate has been run three times (v1, v2, v3) and returned BLOCK each time — see "Phase 2 Entry Gate" below. All four escalated user decisions are now resolved (ADR-017…ADR-021); the gate is blocked on specification and implementation work, not on decisions.**
+**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: 6 of 8 §9 pre-registration deliverables are now done, three of them (schema, token budget, duplication audit) with real, non-fabricated, Hub-connected execution evidence against the live CORD v2 corpus (see "§9 Deliverables — Real Execution Results" below). Two blockers remain: `USER DECISION REQUIRED` on ADR-026 (a real data-quality finding that execution surfaced, affecting `convert_ground_truth` and training targets, not just the schema), and a real Colab T4 run of the VRAM gate. The Phase 2 entry gate has been run three times (v1, v2, v3) and returned BLOCK each time — see "Phase 2 Entry Gate" below.**
 
 - Phase 0 is complete. The user approved the Phase 0 → Phase 1 transition explicitly; the ADR-005 adversarial-review gate for this transition was already satisfied by `reviews/phase_0_adversarial.md` (no new adversarial review was required to start Phase 1 — see that review and `reviews/phase_1_code_review.md` for the record).
 - This session's Phase 1 task was explicitly scoped to: repository/environment bootstrap, `notebooks/00_environment.ipynb`, `notebooks/01_dataset.ipynb`, `src/vlm_lab/data.py`, and local tests. It did **not** cover every exit condition listed in `IMPLEMENTATION_PLAN.md`'s Phase 1 section — see "Unresolved Open Items" below for what remains.
@@ -100,25 +100,69 @@ open decisions land:
 
 ## Next Actions
 
-1. **Not blocked on the user.** D-1…D-4 are decided (ADR-017…ADR-020, amended by ADR-021). The gate is
-   now blocked on specification and implementation work, not on decisions.
-2. Run ADR-005 review round 3 against proposal v3. If it passes, promote the accepted content into
-   `EXPERIMENT_SPEC` / `EVALUATION_PROTOCOL` / `IMPLEMENTATION_PLAN` / new ADRs, create
-   `configs/*.yaml`, and only then start Phase 2.
-3. **Judgement call for the user to weigh:** rounds 1 and 2 both returned BLOCK, and a growing share of
-   the remaining findings are things that are settled most reliably by *writing the code and taking the
-   measurement* rather than by another prose round — the generated JSON Schema and its fixtures, the
-   real token distributions, the duplication audit's actual clusters, and the VRAM numbers. The §9
-   deliverables now specify the rules for all of these, so an alternative to further document rounds is
-   to implement §9 items 1–8 (all Phase 1 exit conditions) and let the measured values close the
-   remaining holes.
-3. Independently of the above, these Phase 1 exit conditions still need implementation and (for the
-   GPU ones) a Colab run: the ADR-008 duplication audit, the ADR-014 production-shape VRAM gate
-   notebook, and a split-scoped loader so test-blindness is structurally enforced rather than left to
-   caller discipline (review finding F5).
-4. **This session's earlier Phase 1 sub-scope remains done** — no further action needed on
-   `notebooks/00_environment.ipynb` / `notebooks/01_dataset.ipynb` / `src/vlm_lab/data.py` /
-   `tests/`, other than F5's loader change above.
+**1. `USER DECISION REQUIRED` — ADR-026, blocking.** Real execution of the schema-generation notebook
+against the full real CORD v2 corpus found that `convert_ground_truth` does not normalize a second
+Donut list-collapse pattern, affecting 14 scalar leaf paths on 57/900 (≈6.3%) train+validation
+records — and, because `convert_ground_truth` also builds training targets, this is a real data-shape
+inconsistency in the training signal, not only a schema-generation inconvenience. See ADR-026 for the
+full finding, the two observed sub-patterns, and four options awaiting a decision. Nothing else in
+this session's Phase 1 closure work depends on this being resolved first, but §9 item 1 (the schema)
+cannot be finalized until it is, and `configs/cord_v2_output.schema.json` /
+`configs/derived_budget.yaml` will need regenerating once `convert_ground_truth` changes.
+
+**2. Run the ADR-014/ADR-018 VRAM gate on a real Colab T4.** `notebooks/01b_vram_gate.ipynb` is
+implemented, consumes the real `configs/derived_budget.yaml` produced in step 1 above, but needs an
+actual GPU — none was available in the environment that ran the CPU-only measurements. This is the
+last remaining §9 deliverable requiring execution rather than specification or implementation.
+
+**3. Once 1 and 2 are resolved: promote and re-review.** Fold ADR-026's resolution and the real VRAM
+gate numbers into `EXPERIMENT_SPEC.md` / `EVALUATION_PROTOCOL.md` / `IMPLEMENTATION_PLAN.md` / new
+ADRs (§9 item 9), create `configs/qwen_cord_{smoke,mini,full}.yaml`, produce the resolved dependency
+lock artifact (§7.5, still open), and run ADR-005 review round 4 against the fully-executed proposal.
+Only after that may Phase 2 start.
+
+**Everything else in the §9 checklist is done, with real, non-fabricated, Hub-connected execution
+evidence** (not simulated, not Colab-only): schema generation, token-budget derivation, and the
+cross-split duplication audit all ran for real against the full dataset on 2026-08-13. See "§9
+Deliverables — Real Execution Results" below for the numbers.
+
+## §9 Deliverables — Real Execution Results (2026-08-13)
+
+`notebooks/01a_closure_measurements.ipynb` was executed for real — genuine Hub-connected network
+access, the real pinned CORD v2 dataset and Qwen3-VL-4B-Instruct processor, no GPU required for this
+notebook by design. **Every cell executed with zero errors**; nothing here is simulated, guessed, or
+carried over from a Colab summary — verified directly from the committed notebook JSON's
+`execution_count`/`outputs`, the same standard applied to every other Colab claim in this file.
+
+- **Schema (§9 item 1):** 843/900 (93.7%) of the corpus validates against the generated
+  `configs/cord_v2_output.schema.json`; 57/900 fail for exactly the reasons ADR-026 documents, and
+  only those reasons (verified: 0 unexpected round-trip failures). `schema_hash` =
+  `2c69ae8ab48b2d9b7558adba5cdde35780ab6c1034062890c10dc571fba741f9`.
+- **Token budget (§9 item 2):** `fixed_prompt_and_template_tokens = 321` (confirmed constant across
+  all 900 samples — the §5.4 step-4 prefix-equality and step-5 terminal-pair assertions both held for
+  every one). Measured distributions (p50/p95/max): `eval_prefix_len` 1329/1335/1345,
+  `train_seq_len` 1409/1557/1867, `assistant_label_n` 102/250/575, `image_token_n` 1008/1014/1024.
+  Derived: `image_token_ceiling = 1024`, `eval_prefix_upper_bound = 1345`, `max_new_tokens = 719`,
+  `max_seq_len = 2064` (well under `max_position_embeddings = 262144`). Written to
+  `configs/derived_budget.yaml`.
+- **Duplication audit (§9 item 5):** **`EVALUABLE`** — retained 81 test receipts (19 excluded),
+  81 independent test clusters, effective sample size 81.0, 81 retained validation receipts
+  (19 excluded); all four ADR-023 floors (60/40/50.0/60) passed with room to spare.
+  `results/duplication_audit_public.json` committed (aggregate counts and verdict only); the sealed
+  38-line per-receipt manifest stays local-only per `.gitignore`, and was never printed to any cell
+  output at any point — verified directly, not merely asserted.
+
+**Major finding from this run, not a simple pass/fail:** the schema generation attempt initially
+failed with a real `SchemaShapeError` against actual CORD v2 data. Investigating it (train/validation
+content only, per ADR-008) surfaced ADR-026 — see above. Two smaller defects were also found and
+fixed while integrating this work: the notebook's own revision guard (added the previous day) printed
+`<unknown> @ <unknown>` on the very first Colab run because `os.chdir` ran before a relative `git -C`
+call — the same swallow-the-error pattern the guard existed to catch, fixed to fail loudly with the
+real git error instead; and my own exclusion-detection helper inside the notebook, on its first
+implementation, over-excluded 896 of 900 records because a "try removing one candidate" heuristic
+cannot find multiple simultaneous culprits at one path — rewritten to determine the correct excluded
+set directly from the schema algorithm's own shape rules, cross-checked against a standalone
+diagnostic script before being trusted.
 
 ## USER DECISIONS — all four RESOLVED 2026-08-12
 

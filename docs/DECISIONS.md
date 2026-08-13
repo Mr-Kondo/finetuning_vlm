@@ -664,3 +664,45 @@ Split the requirement in two:
 **Consequences:**
 - `IMPLEMENTATION_PLAN.md`'s Phase 2 section must record this entry criterion when the pre-registration is promoted.
 - The gate may treat R3-14 as closed, on the explicit understanding that half of it has been *deferred with a named trigger* rather than satisfied — recorded here so a later reader does not mistake it for fully discharged.
+
+---
+
+## ADR-026: A Second Donut List-Collapse Pattern, Found by Real Execution, Affects Scalar Leaf Fields and Training Targets — USER DECISION REQUIRED
+
+- **Date:** 2026-08-13
+- **Status:** Open — `USER DECISION REQUIRED`
+- **Trigger:** Real execution of `notebooks/01a_closure_measurements.ipynb` against the full real CORD v2 train+validation corpus (900 records, Hub-connected, not simulated).
+
+**Context:**
+
+`convert_ground_truth` (`src/vlm_lab/data.py`) has, since Phase 1, normalized one specific Donut serialization quirk: `menu`, `void_menu` and nested `sub` collapse from a one-element list to a bare dict, and `convert_ground_truth` wraps them back into a list. This was understood as *the* Donut list-collapse behavior for this dataset, reviewed multiple times, and covered by 18 unit tests.
+
+Executing the §6.5 schema-generation algorithm against the **full** 900-record train+validation corpus — the first time anything in this project has walked every leaf of every record — found that this understanding was incomplete. **14 distinct scalar leaf paths** also collapse to a list on a minority of records, and `convert_ground_truth` does not normalize any of them:
+
+`menu[].cnt`, `menu[].nm`, `menu[].discountprice`, `menu[].num`, `sub_total` (the whole object, once), `sub_total.discount_price`, `sub_total.etc`, `sub_total.othersvc_price`, `sub_total.subtotal_price`, `sub_total.tax_price`, `total.cashprice`, `total.changeprice`, `total.creditcardprice`, `total.total_price`.
+
+**57 of 900 records (≈6.3%)** are affected, each on one or a few of these paths. Direct inspection (train/validation only, safe to display) shows **two distinct sub-patterns**:
+
+- **Exact-duplicate collapse** — the same value repeated:
+  `subtotal_price: ["20,000", "20,000"]`, `cashprice: ["100,000", "100,000"]`, `discount_price: ["0", "0"]`.
+- **Genuinely distinct values** — different amounts under one key:
+  `sub_total.etc: ["1,213,000", "60,000", "70,000"]`, `total.cashprice: ["74,000", "100,000"]`,
+  `menu[].cnt: ["TRIPPLE CHEESE", "1"]` (this last one looks like a name/count field-association
+  error rather than a duplicate-detection collapse, and may need its own treatment).
+
+**Why this is more than a schema-generation inconvenience:** `convert_ground_truth` is not only the schema's input — it is also what `§5.4` uses to build **training targets**. For these same 57 records, the JSON the model would currently be trained to reproduce contains a list where `§5.3`'s prompt promises a plain string. This is a real, pre-existing inconsistency in the training signal for a genuine 6% slice of the corpus, not merely a diagnostic-schema issue.
+
+**What was and was not done about it:** `notebooks/01a_closure_measurements.ipynb` detects every offending path and the exact record(s) responsible, reports all 57 in full (train/validation only, always safe), builds the schema **excluding only those 57 records**, and validates the **full** 900-record corpus against the resulting schema so every exclusion's consequence stays visible as a reported round-trip failure (843/900 pass; the other 57 fail for exactly the reported reason, none unexpectedly). **`convert_ground_truth` was not modified.** Deciding how it *should* normalize these fields is exactly the kind of implementation-revealed specification question `AGENTS.md` §6/§17 requires escalating rather than resolving unilaterally — and the two observed sub-patterns plausibly need different treatment, so a single blanket rule risks being wrong for some fields.
+
+**Decision:** Not yet made. Options for the user to choose among, or to reject in favor of another:
+
+1. **Per-pattern normalization in `convert_ground_truth`.** Exact-duplicate collapse → keep one copy (first or last; they're identical so it doesn't matter which). Genuinely-distinct-values collapse → needs a per-field rule: join with a separator (loses the "single scalar" property the prompt promises), keep the first occurrence, keep the last (often the more complete/corrected OCR reading in practice, but unverified), or sum (only sensible for genuinely additive amount fields, and only if the values are additive rather than alternate readings of the same amount — unconfirmed without deeper inspection).
+2. **Exclude the 57 affected records from train+validation entirely**, as a data-cleaning step, documented as such. Simple and uniform, but discards ~6% of the already-small 800-row train set, and does nothing for the `cnt`/`TRIPPLE CHEESE`-style case if it turns out to recur elsewhere in ways not yet found (the audit was not designed to search for annotation errors generally, only for the schema-shape symptom of them).
+3. **Represent affected fields as arrays in the schema/training target** rather than forcing a scalar, changing `§5.3`'s prompt and `§6.3`'s scoring to accept an array of strings for these specific keys. Preserves all information and needs no per-record judgment call, but changes the task's stated output contract from "every value is a plain string" to a more permissive schema, is a real methodology change, and would need the `§6.1`/`§6.3` metric rules re-examined for how array-valued leaves are scored.
+4. **Investigate further first** (e.g. render a handful of the affected receipt *images*, train/validation only, to see what the source document actually shows at these fields) before choosing among 1–3, since the `menu[].cnt` example in particular looks more like an annotation error than a genuine multi-value field.
+
+**Consequences (once decided):**
+- `src/vlm_lab/data.py`'s `convert_ground_truth` will need a corresponding code change and new unit tests (a bounded, well-scoped implementation task, not requiring another design round).
+- `configs/cord_v2_output.schema.json` and `configs/derived_budget.yaml` (both already written by the real 2026-08-13 execution) will need regenerating from the corrected `convert_ground_truth` output — the current artifacts are evidence of the finding, not final pre-registration inputs.
+- `EXPERIMENT_SPEC.md` and `EVALUATION_PROTOCOL.md` must record whichever rule is chosen, when the pre-registration is promoted (§9 item 9).
+- This blocks §9 item 1 from being marked complete until resolved; it does **not** block items 2, 3, 4, 5, 6, 7 or 8, which do not depend on it.

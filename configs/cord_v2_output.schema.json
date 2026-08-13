@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "menu": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cnt": {
+            "type": "string"
+          },
+          "discountprice": {
+            "type": "string"
+          },
+          "nm": {
+            "type": "string"
+          },
+          "num": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string"
+          },
+          "sub": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cnt": {
+                  "type": "string"
+                },
+                "nm": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "string"
+                },
+                "unitprice": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": []
+            }
+          },
+          "unitprice": {
+            "type": "string"
+          },
+          "vatyn": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": []
+      }
+    },
+    "sub_total": {
+      "type": "object",
+      "properties": {
+        "discount_price": {
+          "type": "string"
+        },
+        "etc": {
+          "type": "string"
+        },
+        "service_price": {
+          "type": "string"
+        },
+        "subtotal_price": {
+          "type": "string"
+        },
+        "tax_price": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": []
+    },
+    "total": {
+      "type": "object",
+      "properties": {
+        "cashprice": {
+          "type": "string"
+        },
+        "changeprice": {
+          "type": "string"
+        },
+        "creditcardprice": {
+          "type": "string"
+        },
+        "emoneyprice": {
+          "type": "string"
+        },
+        "menuqty_cnt": {
+          "type": "string"
+        },
+        "menutype_cnt": {
+          "type": "string"
+        },
+        "total_etc": {
+          "type": "string"
+        },
+        "total_price": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": []
+    },
+    "void_menu": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "nm": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": []
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": []
+}
