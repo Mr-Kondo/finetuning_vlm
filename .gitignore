@@ -20,3 +20,9 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# ADR-008 test blindness: the sealed cross-split duplication manifest names
+# individual test-split receipts and must never be committed. Only its
+# aggregate public_report() output (results/duplication_audit_public.json)
+# is safe to commit.
+results/sealed/
