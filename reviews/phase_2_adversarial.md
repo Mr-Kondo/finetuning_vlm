@@ -533,3 +533,151 @@ Minimum blockers named by the reviewer: freeze a defensible near-duplicate and c
 policy; reconcile ADR-017/ADR-019 with the reduced estimand; fully specify the metrics and schema;
 correct the training and VRAM configuration contracts; complete the VLM input/token freeze and the
 test-access boundary.
+
+---
+
+# Round 3 — Re-review of proposal v3
+
+- **Review date:** 2026-08-13
+- **Reviewed state:** commit `a7c6f11` (proposal v3 + ADR-021)
+- **Review model:** Codex (GPT-5.6 Sol role), read-only
+- **Scope:** closure verification for all round-2 findings and every round-1 finding still open, plus
+  adversarial review of v3's new specifications and its concrete runtime claims.
+
+## Overall outcome
+
+**BLOCK — the ADR-005 gate is still NOT satisfied.**
+
+Round-2 closure: **CLOSED 3 · PARTIALLY CLOSED 12 · NOT CLOSED 0.**
+Remaining round-1 findings: **CLOSED 3 (F13, F15, and F3's substantive policy) · PARTIALLY CLOSED 10
+· NOT CLOSED 1 (F11).**
+New round-3 findings: **13 `required`, 2 `recommended`.**
+
+Reviewer's framing: v3 is substantially stronger and its bootstrap procedure is now coherent, but
+several remaining holes are *decision rules*, not merely measured values.
+
+## Round-3 findings and dispositions
+
+All 15 **ACCEPT**. Two identify concrete technical bugs in v3's specification.
+
+**R3-1 — Plain `Trainer` cannot implement the registered checkpoint-selection metric.** `required`
+`eval_strategy: epoch` invokes `Trainer.evaluate()`, whose prediction step returns teacher-forced loss
+and logits. It does not generate JSON, so it cannot produce the validation TED-Acc that §7.4 selects
+on — and it would retain vocabulary-sized logits for every token.
+→ **ACCEPT.** A real defect. Fixed in v3.1: a named `ValidationGenerationCallback` runs at
+`on_evaluate` after the epoch checkpoint is saved, calls the same shared inference/evaluation
+functions Phase 5 uses (ADR-006), and writes a selection log; `metric_for_best_model` is unset and
+`load_best_model_at_end: false`, so selection happens mechanically afterwards.
+
+**R3-2 — The frozen training sequence contains two EOS tokens.** `required`
+The pinned Qwen template already emits `<|im_end|>\n` after the assistant content and `<|im_end|>` *is*
+EOS, so v3's manual EOS append produced `target + EOS + EOS` while claiming "target plus EOS". v3's
+"if the equivalence test fails, the processor's path wins" also left the actual rule open.
+→ **ACCEPT.** A real defect. Fixed in v3.1: no manual EOS; the template's single terminator is the
+registered one; the canonical `apply_chat_template(..., tokenize=True, return_dict=True)` call is
+frozen unconditionally; and an assertion requires exactly one terminal EOS.
+
+**R3-3 — The token formula does not bound a longer hidden-test input.** `required`
+`max_seq_len` uses the maximum evaluation prefix *observed* over train+validation, but a hidden-test
+image can produce a larger grid while still obeying `longest_edge`. Arm D would then test the longest
+observed development input, not the worst input the configuration permits.
+→ **ACCEPT.** Requires a processor-cap-derived upper bound, with the measured distributions kept as
+descriptive only.
+
+**R3-4 — Cross-split "near duplicate" is still not a unique algorithm.** `required`
+ADR-021 says "dHash cluster" while §8.1's table says direct `dHash ≤ 3`; since Hamming adjacency is
+non-transitive, a test receipt can reach a train receipt through an intermediate without being within
+distance 3 of it, and the two readings exclude different rows. The table also marks test↔test exact
+"n/a" while §6.4 explicitly draws edges on equal pixel hashes.
+→ **ACCEPT.** One cross-split graph algorithm must be frozen, including whether exclusion propagates.
+
+**R3-5 — Validation exclusion has no evaluability or fallback rule.** `required`
+Train↔validation matches are excluded with no minimum retained validation count and no deterministic
+consequence if it becomes too small for a four-trial comparison.
+→ **ACCEPT.** A validation floor and its consequence (halt Phase 4 as not evaluable) must be frozen
+before the audit, and the reduced validation selection estimand named.
+
+**R3-6 — The 60/40 floor is a safeguard, not a power justification.** `required`
+Count floors do not determine CI width: 39 singletons plus one 21-row cluster passes both floors while
+Kish ESS is only 7.5.
+→ **ACCEPT.** Keep 60/40 but label it a minimum-stability safeguard, add an ESS floor or a simulation
+justification, and stop implying +0.05 is thereby "resolvable".
+
+**R3-7 — Schema construction silently misclassifies heterogeneous shapes.** `required`
+"Otherwise → leaf" turns any mixed or unsupported observed shape into a string leaf, producing a
+schema that rejects its own reference data.
+→ **ACCEPT.** Explicit shape inference with a hard gate failure on heterogeneous or unsupported
+shapes, and `additionalProperties:false` / `required:[]` on every generated object.
+
+**R3-8 — The companion metric loses row and parent-child association.** `recommended`
+Index-free paths make it a bag of field values: `(A,1),(B,2)` scores 1.0 against `(A,2),(B,1)`, and a
+`sub` item loses its parent menu row.
+→ **ACCEPT.** Renamed **index-free field-value multiset F1** with its blindness documented
+(ADR-022). Deterministic row matching is recorded as a possible future ADR, not adopted now.
+
+**R3-9 — Several deferred items are choices, not measurements.** `required`
+The Donut SHA, the `peft`/`bitsandbytes`/`accelerate`/`jsonschema`/`zss`/`nltk` versions and the exact
+synthetic-probe fixtures do not arise from measuring train+validation, yet were left as §9 items.
+→ **ACCEPT** — a direct hit on v3's own "freeze the rule, defer only the value" principle. Pinned in
+v3.1 from live lookups: Donut `4cfcf972560e1a0f26eb3e294c8fc88a0d336626`, `zss==1.2.0`,
+`nltk==3.10.3`, `peft==0.20.0`, `bitsandbytes==0.50.0`, `accelerate==1.14.0`, `jsonschema==4.26.0`,
+`pyyaml==6.0.3`. The exact probe fixtures remain to be frozen.
+
+**R3-10 — QLoRA preparation and sampler semantics remain implicit.** `required`
+`prepare_model_for_kbit_training()` is never mentioned though it changes frozen parameters, dtypes and
+gradient-input behaviour, and `train_sampling_strategy` was omitted from a "complete" configuration.
+→ **ACCEPT.** Fixed in v3.1: the load → k-bit preparation → adapter injection order and its kwargs are
+frozen, and `train_sampling_strategy: random` is stated explicitly.
+
+**R3-11 — Rerun cases 3 and 4 overlap.** `required`
+A post-processing traceback, failing sample index, sequence length or OOM location can be the very
+evidence used to diagnose the defect; sealing predictions does not make that telemetry
+test-independent.
+→ **ACCEPT.** Case 3 must require a defect discovered independently of *all* test-derived telemetry,
+with an explicit allowlist; otherwise case 4 applies.
+
+**R3-12 — The VRAM inequality is dimensionally valid but incomplete.** `required`
+`max_memory_reserved ≤ baseline_free − 1 GiB` no longer double-counts, but ignores non-PyTorch
+allocations even though they are measured.
+→ **ACCEPT.** Both the PyTorch inequality and a global `min_free_observed ≥ 1 GiB` condition, with a
+defined sampling mechanism able to catch transient lows.
+
+**R3-13 — Two VRAM-gate decision rules remain unspecified.** `required`
+"Step-time blow-up" has no threshold or baseline, so the soft NO-GO can be called or ignored after the
+fact; and arm D as worded is impossible in Phase 1 because no trained adapter exists yet; arm C also
+spans two processes despite "one fresh process per arm".
+→ **ACCEPT.** Define the timing statistic, warmup, repetitions, baseline and numeric threshold; define
+arm D against an *initialized* adapter of the registered shape; specify the two-process resume
+protocol.
+
+**R3-14 — The loader improves accidental safety but does not prove the Phase-2 boundary.** `required`
+Phase-2 code can still import the public `load_sealed_test_split()`, and the proposed test only checks
+the development function.
+→ **ACCEPT.** Sealed access behind a separate Phase-5 module whose import is prohibited in Phase-2
+code, plus an integration test of the actual Phase-2 loading path with the Hub boundary patched.
+
+**R3-15 — ADR and STATE terminology remains contradictory.** `required`
+ADR-020 and STATE still said "strict verbatim" and "guardrail"; STATE still described ADR-019's
+superseded near-duplicate policy.
+→ **ACCEPT.** Fixed in v3.1 via **ADR-022** (terminology amendment to ADR-020, preserving ADR-020's
+body per `AGENTS.md` §36) plus STATE and proposal-summary updates.
+
+## Verified sound in round 3
+
+- The retained-test connected-components bootstrap and the receipt-weighted replicate statistic are
+  **operationally defined and statistically coherent** under the declared cluster-independence
+  assumption (closes F13).
+- The train/validation/test role separation is unambiguous (closes F15).
+- All `TrainingArguments` field names listed in v3 are real `transformers==5.15.0` fields; the four
+  `TBD-MEASURED` token tables are legitimate deferred measurements.
+- The empty/empty value of 1.0 for the companion metric is sensible.
+
+## Gate status after round 3
+
+**ADR-005 adversarial review for Phase 2 entry: BLOCK — still NOT SATISFIED.**
+
+Reviewer's named blockers: the training EOS construction, generative validation under plain
+`Trainer`, the incomplete VRAM criterion, the unresolved evaluator/dependency pins, and the ambiguity
+introduced by duplicate exclusions. Of these, **the EOS construction, generative validation, k-bit
+preparation order, dependency pins and terminology are fixed in v3.1**; the remainder are carried
+forward.

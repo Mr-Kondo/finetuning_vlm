@@ -517,3 +517,54 @@ defects in that write-up — in Claude Code's drafting, not in the user's decisi
 - Because exclusion is non-random, the Phase 6 report must state that the conclusion does not
   generalize to receipts resembling the training set — which is the honest scope of a held-out claim
   anyway.
+
+---
+
+## ADR-022: Amend ADR-020 — "Trimmed Verbatim" and "Diagnostic", Not "Strict Verbatim" and "Guardrail"
+
+- **Date:** 2026-08-13
+- **Status:** Accepted
+- **Amends:** ADR-020 (terminology only; the user's decision is unchanged)
+- **Trigger:** `reviews/phase_2_adversarial.md` Round 2 Finding R2-5 and Round 3 Finding R3-15 (Codex adversarial re-review). ACCEPT.
+
+**Context:**
+ADR-020 recorded the user's choice of a verbatim-transcription estimand with TED-Acc as the primary
+metric and a per-receipt field-exact companion. The adversarial reviews found two of its labels
+inaccurate — not the decision, the words used to describe it:
+
+1. **"Strict verbatim" overstates what is scored.** The prompt demanded spacing "character for
+   character", but scoring strips leading/trailing whitespace, and the vendored Donut evaluator's own
+   `normalize_dict` additionally strips scalar strings and drops empty values. Literal
+   character-for-character scoring is not achievable through the pinned evaluator at all, so the
+   instruction and the metric were describing different tasks — the same class of inconsistency
+   ADR-020 was created to remove.
+2. **"Guardrail" overstates the companion metric's authority.** ADR-020 deliberately keeps it out of
+   the decision rule. A metric that cannot block a TED-Acc pass is a diagnostic. Round 3 further
+   established that replacing every array index with `[]` makes it a *bag* of field values: reference
+   rows `(name=A, price=1)` and `(name=B, price=2)` score 1.0 against `(A,2)` and `(B,1)`, and a `sub`
+   item loses its association with its parent menu row. "Field-exact" therefore overstates it too.
+
+**Decision:**
+Terminology only; no change to the estimand, the primary metric, the threshold, or the decision rule.
+
+- The estimand is named **"trimmed verbatim transcription"**. Leading/trailing whitespace is ignored;
+  everything else — internal spacing, digit grouping, currency symbols, case, full-width/half-width
+  forms — is compared exactly. The prompt in the pre-registration is worded to match.
+- A leaf whose value is empty after trimming counts as **absent** on both sides.
+- The companion metric is named **"index-free field-value multiset F1"** and is designated a
+  **mandatory diagnostic**, not a guardrail. Its documented limitation — blindness to row and
+  parent-child association — must be stated wherever it is reported.
+
+**Alternatives Considered:**
+- Keeping "strict verbatim" and instead preserving all leaf whitespace: would require abandoning the
+  vendored Donut evaluator or patching it, which conflicts with ADR-009's requirement to use a pinned
+  official implementation or document every difference; not adopted.
+- Adding deterministic row/subtree matching so the companion metric earns the name "field-exact":
+  defensible, but it is a new metric definition rather than a naming fix, and the metric is
+  non-binding; recorded as a possible future ADR rather than adopted now.
+
+**Consequences:**
+- `EXPERIMENT_SPEC.md` §4's prompt and `EVALUATION_PROTOCOL.md` §5.1 must use the amended terminology
+  when the pre-registration is promoted.
+- ADR-020's body is left intact per `AGENTS.md` §36 (historical ADR bodies are not rewritten); this
+  ADR is the amendment of record.

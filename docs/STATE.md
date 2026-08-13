@@ -128,8 +128,8 @@ recorded as ADRs with their rationale and rejected alternatives. They are no lon
 |---|---|---|
 | D-1 | Improvement threshold **X = 0.05** | [[DECISIONS]] ADR-017 |
 | D-2 | Run the ADR-014 VRAM gate on the **free-tier T4 first**, then decide the tier; the T4 path (fp16 load+compute, SDPA) is pinned until the measurement says otherwise | [[DECISIONS]] ADR-018 |
-| D-3 | **Exact cross-split duplicates excluded** from test; near-duplicate clusters become **group-aware bootstrap** units; policy frozen *before* the audit runs | [[DECISIONS]] ADR-019 |
-| D-4 | Estimand is **strict verbatim transcription**; TED-Acc stays primary with a mandatory per-receipt **field-exact guardrail** | [[DECISIONS]] ADR-020 |
+| D-3 | Cross-split duplicates **excluded** (exact *and* near, per relation); clustering is reserved for **within-test** dependence; policy frozen *before* the audit runs | [[DECISIONS]] ADR-019, amended by ADR-021 |
+| D-4 | Estimand is **trimmed verbatim transcription**; TED-Acc stays primary with a mandatory per-receipt **index-free field-value multiset F1 diagnostic** | [[DECISIONS]] ADR-020, amended by ADR-022 |
 
 Note that ADR-019 authorises a departure from ADR-007's fixed `test = 100` count whenever an exact
 cross-split duplicate is found. That departure is deliberate and recorded, not incidental; the

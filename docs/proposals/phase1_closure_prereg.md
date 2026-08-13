@@ -1,4 +1,4 @@
-# Phase 1 Closure and Phase 2 Pre-Registration — PROPOSAL (DRAFT v3)
+# Phase 1 Closure and Phase 2 Pre-Registration — PROPOSAL (DRAFT v3.1)
 
 > **THIS DOCUMENT IS NOT AUTHORITATIVE.**
 > It is a *proposal* to close the remaining Phase 1 exit conditions in
@@ -46,8 +46,8 @@ Two of v1's own claims were **wrong** and are called out here rather than quietl
 |---|---|
 | ADR-017 | Improvement threshold **X = 0.05** |
 | ADR-018 | Run the VRAM gate on the **free-tier T4 first**, then decide the tier; T4 path (fp16 + SDPA) pinned until it says otherwise |
-| ADR-019 | **Exact cross-split duplicates excluded**; near-duplicate clusters become **group-aware bootstrap** units; policy frozen before the audit runs |
-| ADR-020 | Estimand is **strict verbatim transcription**; TED-Acc stays primary, with a mandatory per-receipt **field-exact guardrail** |
+| ADR-019 (amended by ADR-021) | Cross-split duplicates **excluded — exact *and* near, per relation**; clustering reserved for **within-test** dependence; policy frozen before the audit runs |
+| ADR-020 (amended by ADR-022) | Estimand is **trimmed verbatim transcription**; TED-Acc stays primary, with a mandatory per-receipt **index-free field-value multiset F1 diagnostic** |
 
 ---
 
@@ -261,7 +261,7 @@ model. Scoping the claim is the remedy; a caveat added afterwards would not be.
 **One candidate, fixed a priori, no search.** This is the strictest option under ADR-009 and removes
 the risk of a search that implicitly tunes the Base condition.
 
-### 5.3 P-10 — The template (ADR-020: strict verbatim)
+### 5.3 P-10 — The template (ADR-020 as amended by ADR-022: trimmed verbatim)
 
 *System:*
 
@@ -355,17 +355,26 @@ then appends the assistant turn + EOS"), which is not an algorithm. The frozen p
 
 1. Build the message list `[system, user(image, text)]` and render it with `add_generation_prompt=true`
    to obtain the **evaluation prefix**; process it to get `prefix_features`.
-2. Build `[system, user(image, text), assistant(target_json)]`, render with
-   `add_generation_prompt=false`, append the tokenizer's EOS, and process it to get `full_features`.
+2. Build `[system, user(image, text), assistant(target_json)]` and render with
+   `add_generation_prompt=false` to get `full_features`. **No EOS is appended manually `[R3-2]`** —
+   the pinned Qwen chat template already emits `<|im_end|>\n` after the assistant content, and
+   `<|im_end|>` *is* the EOS token. v3's earlier wording appended another, producing
+   `target + EOS + EOS` while claiming "target plus EOS". The template's single terminator is the
+   registered one.
 3. `labels = full_features.input_ids.clone()`; set `labels[: prefix_features.input_ids.shape[-1]] = -100`.
    Every position at or before the prefix boundary — which includes all image-token positions — is
-   masked, and only the assistant target plus EOS carries loss (§3.5).
+   masked, and only the assistant target plus its single terminator carries loss (§3.5).
 4. Assert `full_features.input_ids[: prefix_len] == prefix_features.input_ids` element-wise, so the
    prefix boundary is verified rather than assumed.
+5. **Assert exactly one terminal EOS**: `input_ids[-1] == eos_token_id` and `input_ids[:-1]` contains
+   no `eos_token_id` beyond those the template legitimately emits for the system/user turns (counted
+   from the prefix, so the assistant turn contributes exactly one).
 
-An equivalence test must confirm this render-then-process path produces the same tensors as the
-processor's own `apply_chat_template(..., tokenize=True, return_dict=True)` path; if it does not, the
-processor's own path wins and this construction is corrected `[R2-10]`.
+**The canonical call is frozen, not conditional `[R3-2]`.** Both steps use the processor's own
+`apply_chat_template(..., tokenize=True, return_dict=True, return_tensors="pt")`. v3's earlier
+"if the equivalence test fails, the processor's path wins" left the actual rule open; there is now
+one path, and the equivalence test is retained only as a regression check that the rendered text and
+the tokenized output agree.
 
 **Input-equality guarantee `[F1]` `[F22]` `[R2-10]`:** the two conditions **share one precomputed
 input object** — the features are built once per sample and passed to both, so divergence is
@@ -435,7 +444,17 @@ v1 claimed that "vendoring at a pin means there are no differences to document."
 §6.3 wraps the evaluator in our own extraction, normalization and invalid-output rules, making the
 whole thing a custom pipeline whose differences must be documented. Requirements:
 
-1. Record the exact Donut commit SHA in `EVALUATION_PROTOCOL.md` §5.1 and in every result artifact.
+1. **Pinned now, not deferred `[R3-9]`** — these are choices, not measurements, so leaving them as §9
+   deliverables left metric behaviour selectable:
+
+   ```yaml
+   donut_repo: https://github.com/clovaai/donut
+   donut_commit: 4cfcf972560e1a0f26eb3e294c8fc88a0d336626   # master as of 2026-08-13
+   zss:  "1.2.0"
+   nltk: "3.10.3"
+   ```
+
+   The SHA is recorded in `EVALUATION_PROTOCOL.md` §5.1 and in every result artifact.
 2. Transcribe the pinned source's **actual** behaviour into §5.1 in prose — field flattening, key
    accumulation, `menu` ordering, duplicate-row handling, the F1 aggregation level, and the TED
    normalization denominator. Not asserted from memory here; it is a §9 deliverable.
@@ -630,6 +649,7 @@ gradient_checkpointing: true
 gradient_checkpointing_kwargs: {use_reentrant: false}
 per_device_eval_batch_size: 1
 data_seed: 42                        # sampler/data ordering
+train_sampling_strategy: random      # [R3-10] the pinned runtime's default, stated explicitly
 seed: 42
 save_strategy: epoch
 eval_strategy: epoch
@@ -640,6 +660,34 @@ fp16: true
 bf16: false
 report_to: []
 ```
+
+**Generative validation, frozen `[R3-1]`.** `eval_strategy: epoch` alone invokes
+`Trainer.evaluate()`, whose prediction step returns teacher-forced loss and logits — it does **not**
+generate JSON, so it cannot produce the validation TED-Acc that §7.4 selects on, and it would also
+retain vocabulary-sized logits for every token. The frozen path:
+
+- A named **`TrainerCallback`** (`ValidationGenerationCallback` in `src/vlm_lab/training.py`) runs at
+  `on_evaluate`, after the epoch checkpoint has been saved.
+- It calls the **same shared inference and evaluation functions** used by Phase 5 (ADR-006), over the
+  retained validation split, and writes `{epoch, checkpoint_path, ted_acc, field_exact}` to a
+  selection log.
+- The trainer's own loss-based evaluation is left enabled only for the training-loss curve;
+  `metric_for_best_model` is **not** set and `load_best_model_at_end: false`, so the trainer never
+  performs selection. Selection is done afterwards, mechanically, from the selection log per §7.4.
+
+**Quantized-model preparation order, frozen `[R3-10]`:**
+
+```
+load 4-bit model (§2)
+  → prepare_model_for_kbit_training(model, use_gradient_checkpointing=True,
+                                    gradient_checkpointing_kwargs={"use_reentrant": False})
+  → get_peft_model(model, LoraConfig(...))   # §3.2/§3.3
+  → model.config.use_cache = False
+```
+
+This order matters: k-bit preparation changes frozen parameters, dtypes and gradient-input behaviour,
+and doing it after adapter injection gives different results. The `use_reentrant: false` path is
+validated against the pinned `peft` version in §8.2 arm A.
 
 Additionally frozen outside `TrainingArguments` `[R2-7]`:
 
@@ -685,8 +733,21 @@ the rule stays mechanical and no patience hyperparameter needs pre-registering.
 contains **neither `peft` nor `bitsandbytes`**, both of which this design depends on. Required before
 Phase 2:
 
-- Add exact `==` pins for `peft`, `bitsandbytes`, `accelerate` (if used by the trainer), `pyyaml`,
-  `zss` and `nltk`.
+- Add exact `==` pins. **Values fixed now `[R3-9]`**, since they are choices rather than measurements:
+
+  ```toml
+  peft         == 0.20.0
+  bitsandbytes == 0.50.0
+  accelerate   == 1.14.0
+  jsonschema   == 4.26.0     # §6.5 strict-schema validator
+  pyyaml       == 6.0.3
+  zss          == 1.2.0      # §6.2
+  nltk         == 3.10.3     # §6.2 — donut/util.py imports nltk.edit_distance
+  ```
+
+  Compatibility of these against the pinned `transformers==5.15.0` / `torch==2.13.0` / Python 3.12 is
+  itself an execution check in the §8.2 gate arm A; a conflict there is a specification revision
+  before Phase 2, not a silent version bump.
 - Direct pins do not freeze transitive resolution across Colab sessions, so also produce a **resolved
   lock artifact** (e.g. `uv pip compile` / `pip freeze` output) committed alongside, and record its
   hash in every result artifact.
@@ -878,7 +939,7 @@ performance output before the pre-registration exists.
 | P-7 | Token budget derived jointly from measurement | proposal |
 | P-8 / P-9 / P-10 | Zero-shot, single a-priori prompt, verbatim wording | proposal (ADR-020) |
 | P-10b | Complete input freeze + equality assertion | proposal |
-| P-11 / P-11b | TED-Acc primary + field-exact guardrail; synthetic-error probe | proposal (ADR-020) |
+| P-11 / P-11a / P-11b | TED-Acc primary + index-free field-value multiset F1 **diagnostic**; synthetic-error probe | proposal (ADR-020/022) |
 | P-12 | Donut vendored at a pin; `zss` **and** `nltk`; fixtures | proposal |
 | P-13 | Parsing / verbatim normalization / validity-split rules | proposal (ADR-020) |
 | P-14 | B=10000, percentile, 95%, **group-aware** units | proposal (ADR-019) |
@@ -915,6 +976,22 @@ amending ADR-019's write-up (not the decision) to close the leakage hole round 2
 | R2-14 artifact | Versioned JSONL, unique key, content-addressed writes, sealed exclusion manifest (§8.4) |
 | R2-15 STATE | `docs/STATE.md` made internally consistent during this integration pass |
 
-**Gate status:** ADR-005 adversarial review of **v3** — PENDING. Rounds 1 and 2 both returned BLOCK
-(`reviews/phase_2_adversarial.md`); round 2 closed 11 of 25 round-1 findings outright. v3 must not be
-promoted, and `02_baseline.ipynb` must not be executed, until a review passes.
+**Gate status:** ADR-005 adversarial review — **three rounds run, all BLOCK**
+(`reviews/phase_2_adversarial.md`). Round 3 reviewed v3 and returned 15 further findings, all
+dispositioned ACCEPT.
+
+**v3.1** fixes the subset of round-3 findings that are unambiguous and self-contained: the double-EOS
+training construction (R3-2), generative validation under a named callback instead of plain
+`Trainer.evaluate()` (R3-1), the k-bit preparation order and `train_sampling_strategy` (R3-10), the
+evaluator and dependency pins that were choices rather than measurements (R3-9), and the terminology
+contradictions (R3-15, via ADR-022).
+
+**Still open from round 3:** R3-3 (hidden-test input upper bound), R3-4 (one cross-split graph
+algorithm), R3-5 (validation floor), R3-6 (ESS floor / stop implying resolvability), R3-7
+(heterogeneous-shape gate failure), R3-11 (telemetry allowlist for rerun case 3), R3-12 (global
+free-memory condition), R3-13 (timing threshold, arm D against an initialized adapter, two-process
+resume), R3-14 (Phase-5-only sealed module + integration test), and R3-9's remaining item (freezing
+the exact synthetic-probe fixtures).
+
+This document must not be promoted, and `02_baseline.ipynb` must not be executed, until a review
+passes.
