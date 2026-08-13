@@ -222,8 +222,28 @@ image_token_n:      {p50: TBD-MEASURED, p95: TBD-MEASURED, max: TBD-MEASURED}
 
 # Step 3 — derived by fixed formula from the joint measurements above
 max_new_tokens: ceil(assistant_label_n.max * 1.25)
-max_seq_len:    max(train_seq_len.max, eval_prefix_len.max + max_new_tokens)
+max_seq_len:    max(train_seq_len.max, eval_prefix_upper_bound + max_new_tokens)
 ```
+
+**`eval_prefix_upper_bound`, and why it is not `eval_prefix_len.max` `[R3-3]`.** The measured
+maximum over train+validation is an *observation*, not the maximum the configuration permits: a
+held-out test image can produce a larger grid while still obeying `processor_size`. Sizing the
+budget from the observed maximum would let a legitimately larger test input truncate silently, and
+would make §8.2 arm D measure the longest *seen* input rather than the worst *allowed* one.
+
+Because `longest_edge` caps total pixels and one merged visual token covers a 32×32 px block, the
+image side has an exact ceiling, and the prompt is a single fixed template so its rendered token
+count is a constant rather than a distribution:
+
+```
+image_token_ceiling        = processor_size.longest_edge // (patch_size * spatial_merge_size)**2
+                           = 1_048_576 // 1024 = 1024
+eval_prefix_upper_bound    = image_token_ceiling + fixed_prompt_and_template_tokens
+```
+
+`fixed_prompt_and_template_tokens` is measured once (§9 deliverable 2) by rendering the §5.3
+template through the pinned processor; it does not vary by sample. The four measured distributions
+remain, but as **descriptive reporting only** — they no longer feed the budget.
 
 **Assertion:** `max_seq_len` must not exceed the pinned model's maximum context; the gate fails loudly
 if it does. `TBD-MEASURED` values come from §9 deliverable 2 and are frozen into `configs/*.yaml`
@@ -427,6 +447,31 @@ any model output exists, both metrics are scored on constructed cases — wrong 
 field, extra field, item reorder, invalid JSON, near-correct OCR — and the table is transcribed into
 `EVALUATION_PROTOCOL.md` §5.1.
 
+**The fixture set, frozen `[R3-9]`.** "A category such as *wrong amount digit*" is not a fixture —
+it leaves the actual inputs selectable, and the ≥ 0.95 consequence below cannot be checked against a
+category. All six cases use this fixed reference:
+
+```json
+{"menu": [{"nm": "SPGTHY BOLOGNASE", "cnt": "1", "price": "58,000"},
+          {"nm": "ICED LEMON TEA",   "cnt": "1", "price": "22,000"}],
+ "total": {"total_price": "80,000"}}
+```
+
+and these exact predictions:
+
+| # | Case | Prediction (delta from the reference) |
+|---|---|---|
+| 1 | wrong amount digit | `price` of item 1 becomes `"59,000"`; everything else identical |
+| 2 | missing field | item 1's `cnt` key removed |
+| 3 | extra field | item 1 gains `"unitprice": "58,000"` |
+| 4 | item reorder | the two `menu` entries swapped, values untouched |
+| 5 | invalid JSON | the reference serialization with its final `}` removed |
+| 6 | near-correct OCR | `"SPGTHY BOLOGNASE"` becomes `"SPGHTY BOLOGNASE"`; all values identical |
+
+Both metrics are scored on all six and the resulting table is transcribed into
+`EVALUATION_PROTOCOL.md` §5.1. The fixtures are committed and asserted in CI, so a later change to
+the evaluator or its dependencies shows up as a fixture diff rather than a silent metric shift.
+
 Its status is **characterization, not a selection procedure**: it documents how each metric responds,
 and it **cannot** change the primary metric on its own, because ADR-020 already fixed that and a
 metric chosen from probe behaviour after the fact would be a post-hoc selection. The single defined
@@ -561,9 +606,24 @@ is the plain mean over retained receipts. The 95% percentile interval is taken o
 If every cluster is a singleton, this degenerates exactly to the ordinary paired receipt bootstrap;
 that evidence is recorded either way `[F13]`.
 
-**`NOT EVALUABLE` floor (ADR-021):** if the retained set has fewer than 60 receipts or fewer than 40
-clusters, the confirmatory comparison is declared `NOT EVALUABLE` and no improvement claim is made.
-Fixed before the audit so it cannot be chosen once the counts are known.
+**`NOT EVALUABLE` floors (ADR-021), and what they are *not* `[R3-6]`.** The confirmatory
+comparison is declared `NOT EVALUABLE`, with no improvement claim made, if **any** of these fails on
+the retained test set:
+
+```yaml
+min_retained_receipts:  60
+min_independent_clusters: 40
+min_effective_sample_size: 50    # Kish ESS, added in response to R3-6
+```
+
+These are **pre-registered minimum-stability safeguards, not evidence that `X = 0.05` is
+resolvable.** Count floors do not determine CI width: 39 singleton clusters plus one 21-row cluster
+clears both count floors while Kish ESS is only `100² / (39·1² + 21²) = 3600/480 = 7.5`. That is why
+the ESS floor exists alongside them, and why ADR-021's amended wording says "resolvable at the
+retained sample size, subject to the floors" rather than asserting resolvability. **Precision above
+the floors remains outcome-dependent**, and the realized CI width is reported as such rather than
+implied in advance. All three floors are fixed here, before the audit, so none can be chosen once
+the counts are known.
 
 **Percentile over BCa `[F24]`:** chosen for transparency and implementation simplicity — one fewer
 thing that can be silently wrong in the statistic the conclusion hinges on. v1's claim that BCa's
@@ -674,8 +734,25 @@ information has escaped**:
 |---|---|---|
 | 1 | **Infrastructure/artifact failure** (runtime disconnect, crash, corrupted or incomplete artifact) — no output observed | **Exact-config replay.** Nothing about the run's config or code may change. |
 | 2 | **Startup defect before any test example is processed** (e.g. a config fails validation, the model fails to load) | Fix, then run. No test data has been touched, so this is not a test execution at all. Recorded in `docs/STATE.md`. |
-| 3 | **Code/config defect discovered after test examples were processed but while outputs are still sealed** | The run is voided and the sealed outputs are **destroyed unread**. The defect, its evidence and the corrected config are recorded in `docs/STATE.md` *before* the rerun. |
-| 4 | **Defect discovered after any output, metric or test-dependent failure detail has been observed** | The confirmatory claim is **invalidated**. A rerun does not restore it. Continuing requires a **new ADR and an explicit user decision**, and any subsequent result is reported as non-confirmatory. |
+| 3 | **Code/config defect discovered after test examples were processed, outputs still sealed, AND the defect was found *independently of all test-derived telemetry*** (see the allowlist below) | The run is voided and the sealed outputs are **destroyed unread**. The defect, its evidence and the corrected config are recorded in `docs/STATE.md` *before* the rerun. |
+| 4 | **Any defect whose discovery used test-derived telemetry, or discovered after any output or metric has been observed** | The confirmatory claim is **invalidated**. A rerun does not restore it. Continuing requires a **new ADR and an explicit user decision**, and any subsequent result is reported as non-confirmatory. |
+
+**Telemetry allowlist `[R3-11]`.** Cases 3 and 4 previously overlapped, because "outputs are sealed"
+does not make a *traceback* test-independent — a failing sample index, a sequence length, a tensor
+shape or an OOM location is derived from test rows just as much as a prediction is, and can be the
+very evidence used to diagnose the defect. Case 3 therefore applies **only** when the defect was
+found through one of:
+
+- static review of code or configuration, with no run attached;
+- a failure raised **before the first test example is processed**;
+- a failure reproduced on **train or validation** data;
+- infrastructure signals carrying no per-sample information (process exit code, wall-clock timeout,
+  host disconnect, disk-full).
+
+Anything else — including a stack trace raised while processing a test row, a per-sample index or
+length, a shape mismatch observed on test input, or an OOM whose location depends on test data —
+puts the run in **case 4**. When in doubt, case 4 applies: the asymmetry is deliberate, because the
+cost of wrongly preserving a confirmatory claim is far higher than the cost of demoting one.
 
 - **Generation-length termination** (outputs reaching `max_new_tokens`) is model behaviour, **not** a
   defect, and never grounds for a rerun or a larger cap — under any of the four cases.
@@ -853,9 +930,47 @@ The action is therefore relation-specific:
 | `train` ↔ `validation` | excluded from validation | **excluded from validation** |
 | `test` ↔ `test` | n/a | **retained** — the only relation the §6.4 cluster bootstrap handles |
 
-Exclusion counts, the retained receipt and cluster counts, the effective sample size, and the realized
-validation size are always reported — including when nothing is excluded. If the retained test set
-falls below §6.4's floor, the result is `NOT EVALUABLE`.
+**The cross-split graph, pinned as one algorithm `[R3-4]`.** ADR-021's table says "near match
+(dHash cluster)" while an earlier draft of this section said direct `dHash ≤ 3`; those are different
+rules, because Hamming adjacency is **not transitive** — a test receipt can reach a train receipt
+through an intermediate without being within distance 3 of it, and the two readings exclude different
+rows. Frozen:
+
+1. **One graph over all three splits.** Vertices are all 1000 receipts.
+2. **Edges** (identical signals to §6.4, so the two graphs cannot diverge): equal decoded-pixel hash,
+   **or** dHash Hamming distance `≤ 3`, **or** equal value-inclusive canonical ground-truth hash. The
+   type-only template signature contributes **no** edges here either.
+3. **Connected components**, and **exclusion propagates through them**: a `test` receipt is excluded
+   if its component contains *any* `train` or `validation` receipt, even indirectly. A `validation`
+   receipt is excluded if its component contains any `train` receipt. Chosen over direct-pair
+   matching because a chain `train — X — test` still indicates a shared template lineage, and the
+   conservative reading is the one that protects the held-out claim.
+4. **`test`↔`test` matches are never a reason to exclude.** They are retained and become the §6.4
+   resampling units — the earlier "n/a" for exact test↔test in this table was wrong, since §6.4 does
+   draw edges on equal pixel hashes within test.
+5. The component structure is computed **once**, over the full graph, before any exclusion is applied.
+
+Because propagation is transitive, a pathological chain could in principle excise a large share of
+the test set. That is not silently absorbed: it surfaces as the §6.4 floors firing and the result
+being declared `NOT EVALUABLE`, which is the correct outcome — a test set that is largely a
+re-photograph of the training set cannot support a held-out claim.
+
+**Validation floor `[R3-5]`.** Excluding train↔validation matches shrinks the checkpoint-selection
+set, and an unknown, non-random selection set is its own problem. Frozen before the audit:
+
+```yaml
+min_retained_validation_receipts: 60
+```
+
+Below it, **Phase 4 checkpoint selection is declared `NOT EVALUABLE`, training halts, and the
+situation is escalated to the user** — the failure mode this forecloses is quietly switching to a
+different selection metric or split once the retained count turns out to be inconvenient. The
+selection estimand is likewise named: **"CORD v2 validation receipts with no exact or near duplicate
+in train"**.
+
+Exclusion counts, the retained receipt and cluster counts, the effective sample size, and the
+realized validation size are always reported — including when nothing is excluded. If the retained
+test set falls below any of §6.4's three floors, the result is `NOT EVALUABLE`.
 
 **Test blindness `[F4]`:** the audit publishes **aggregate counts and a frozen automated verdict
 only** — never hashes, pair IDs, or candidate renderings, because a test-side hash can be joined
@@ -873,7 +988,18 @@ unsupported margin. Replaced by **four separately-measured arms**:
 | A — Load | model load + NF4 quantization; realized dtypes per module; realized SDPA backend `[F20]` |
 | B — Train | forward + backward + `optimizer.step()` across a **full accumulation window** (8 microbatches) with the exact §7.3 optimizer, at production shape, gradient checkpointing on |
 | C — Resume | a genuine **save → destroy process → reload → one further optimizer step** cycle, covering adapter, optimizer state, scheduler, grad scaler, RNG state and dataloader position — not merely adapter save/reload `[R2-9]` |
-| D — Eval | Base **and** Fine-tuned generation with the decode length **forced to the full configured `max_new_tokens`** (`min_new_tokens = max_new_tokens`, EOS suppressed) at maximum input length, so the KV cache actually reaches its worst case rather than stopping early at EOS `[R2-9]` |
+| D — Eval | Base **and** adapter-applied generation with the decode length **forced to the full configured `max_new_tokens`** (`min_new_tokens = max_new_tokens`, EOS suppressed) at the `eval_prefix_upper_bound` input length (§4), so the KV cache reaches its worst *allowed* case rather than stopping early at EOS `[R2-9]` `[R3-3]` |
+
+**Arm C is deliberately two processes `[R3-13]`**, which is the one exception to "a fresh process per
+arm": a resume that never left the process proves nothing about reload. Process C1 runs two optimizer
+steps and calls the trainer's checkpoint save; process C2 starts cold, loads that checkpoint, and
+runs one further optimizer step. Both report their own peaks, and the gate takes the maximum.
+
+**Arm D uses a freshly *initialized* adapter of the registered shape `[R3-13]`**, not a trained one —
+no fine-tuned adapter exists during Phase 1, so requiring one would make the arm impossible as
+written. This is sound for the arm's purpose: adapter *weights* do not affect memory, only its shape
+and dtype do, and both are pinned by §3.3. The arm is a memory measurement, not a quality
+measurement.
 
 **Measurement protocol, corrected `[R2-9]`.** v1 used an unsupported 13.0 GiB constant; v2 replaced it
 with an invalid inequality — `max_memory_reserved()` is *this process's* allocator peak, while
@@ -887,12 +1013,32 @@ sampled later double-counts the process's own allocation. The protocol is now:
    `torch.cuda.synchronize()` before reading any statistic.
 4. Report `max_memory_allocated`, `max_memory_reserved`, and `total − min_free_observed`
    (a periodically sampled global low-water mark that also captures non-PyTorch allocations).
-5. **GO criterion:** `max_memory_reserved ≤ baseline_free − 1.0 GiB` for every arm, where the 1.0 GiB
-   is a **pre-registered fixed safety margin** for allocator fragmentation and driver overhead — a
-   stated constant, not a residual inferred after the fact.
-6. Because `paged_adamw_8bit` can silently fall back to CUDA unified-memory paging under pressure,
-   arm B additionally reports per-step wall time; a step-time blow-up with apparently-fitting memory
-   is recorded as a **soft NO-GO** `[R2-9]`.
+5. **GO criterion — both conditions must hold for every arm `[R3-12]`:**
+
+   ```
+   (a) max_memory_reserved   <= baseline_free - 1.0 GiB     # PyTorch allocator
+   (b) min_free_observed     >= 1.0 GiB                     # whole device, incl. non-PyTorch
+   ```
+
+   The 1.0 GiB is a **pre-registered fixed safety margin**, not a residual inferred afterwards.
+   Condition (b) exists because (a) alone is blind to allocations PyTorch does not make — CUDA
+   library workspaces, driver overhead, anything else resident on the device. `min_free_observed` is
+   the low-water mark of `torch.cuda.mem_get_info()[0]` sampled by a background thread at **10 Hz**
+   for the duration of the arm, so a transient dip is caught rather than missed between two
+   end-of-arm readings.
+
+6. **Step-time rule, with an actual threshold `[R3-13]`.** `paged_adamw_8bit` can fall back to CUDA
+   unified-memory paging under pressure, which fits in memory while being unusably slow — so timing
+   is part of the verdict, and its rule is fixed here rather than judged after the numbers are seen:
+
+   ```
+   statistic  = median per-optimizer-step wall time over steps 3..10, after 2 discarded warm-up steps
+   baseline   = the same statistic measured in arm B at HALF the production image-token budget
+   soft NO-GO = statistic > 2.0 x baseline   OR   statistic > 60 s/step
+   ```
+
+   A soft NO-GO does not by itself fail the gate; it is reported, and it triggers the §4 fallback
+   ladder exactly as a hard NO-GO does.
 
 Scale reference: fp32 Adam moments for 33,030,144 parameters are `33,030,144 × 2 × 4 = 252.0 MiB`
 before gradients, master weights, activations and allocator effects — which is why the optimizer is
@@ -1070,25 +1216,20 @@ contradictions (R3-15, via ADR-022).
 **R3-14 in part** — the sealed loader lives in its own module and the audit path in a third, with
 `vlm_lab.data` importing neither.
 
-**Still open from round 3, with what each actually needs:**
+**Round-3 findings resolved in v3.2** (specification work, 2026-08-13): **R3-3** (upper bound derived
+from the processor cap, not the observed maximum), **R3-4** (one cross-split graph; exclusion
+propagates through connected components — ADR-023), **R3-5** (validation floor of 60, with halting as
+the consequence — ADR-023), **R3-6** (Kish ESS floor of 50, and the floors relabelled as stability
+safeguards rather than resolvability evidence — ADR-023), **R3-9** (the six synthetic-probe fixtures
+frozen as exact JSON, not categories), **R3-11** (telemetry allowlist separating rerun cases 3 and 4),
+**R3-12** (global `min_free_observed` condition alongside the allocator inequality), **R3-13** (step-time
+statistic and threshold; arm C explicitly two-process; arm D against a freshly *initialized* adapter).
 
-| Finding | What it needs | Blocked on |
-|---|---|---|
-| R3-3 hidden-test input upper bound | a formula derived from the processor cap, not the observed max | nothing — specification |
-| R3-4 one cross-split graph algorithm | pin whether exclusion propagates through connected components across splits | nothing — specification |
-| R3-5 validation floor | a minimum retained validation count and its consequence | nothing — specification |
-| R3-6 ESS floor | relabel 60/40 as a stability safeguard and add an ESS floor | nothing — specification |
-| R3-9 (remainder) probe fixtures | the exact synthetic JSON/reference pairs, frozen | nothing — specification |
-| R3-11 telemetry allowlist | define which failure telemetry is test-independent | nothing — specification |
-| R3-12 global free-memory condition | add `min_free_observed` alongside the allocator inequality | nothing — specification |
-| R3-13 VRAM gate decision rules | timing statistic and threshold, arm D against an *initialized* adapter, two-process resume protocol | nothing to specify; the **numbers** need the gate to run |
-| R3-14 (remainder) Phase-2 integration test | a test that the real Phase-2 loading path issues no test request | **`02_baseline.ipynb` does not exist yet** — and cannot, before the gate passes |
-
-R3-14's remainder is a genuine circularity in the process as designed: the test that proves Phase 2
-never requests the test split cannot be written until Phase 2 code exists, but Phase 2 code may not
-be written until the gate passes. The resolution is to treat the *loader contract plus its
-request-level unit test* as the pre-registered guarantee, and the integration test as a Phase 2
-entry-criterion rather than a Phase 1 exit criterion.
+**Still open:** only **R3-14's remainder** — an integration test asserting that the real Phase-2
+loading path issues no test-split request. This cannot be written yet: `02_baseline.ipynb` does not
+exist, and may not be written until the gate passes. Proposed resolution, requiring user agreement:
+treat the loader contract plus its request-level unit test as the pre-registered guarantee, and make
+the integration test a **Phase 2 entry criterion** rather than a Phase 1 exit criterion.
 
 This document must not be promoted, and `02_baseline.ipynb` must not be executed, until a review
 passes.

@@ -568,3 +568,35 @@ Terminology only; no change to the estimand, the primary metric, the threshold, 
   when the pre-registration is promoted.
 - ADR-020's body is left intact per `AGENTS.md` §36 (historical ADR bodies are not rewritten); this
   ADR is the amendment of record.
+
+---
+
+## ADR-023: Add an ESS Floor and a Validation Floor, and Pin Cross-Split Exclusion Propagation
+
+- **Date:** 2026-08-13
+- **Status:** Accepted
+- **Amends:** ADR-021 (adds two floors and fixes an ambiguity in its exclusion rule)
+- **Trigger:** `reviews/phase_2_adversarial.md` Round 3, Findings R3-4, R3-5 and R3-6 (Codex adversarial re-review). ACCEPT.
+
+**Context:**
+ADR-021 set a `NOT EVALUABLE` floor of 60 retained test receipts / 40 independent clusters and stated that near cross-split matches are excluded. Round 3 found three gaps in that:
+
+1. **Count floors do not bound precision.** ADR-021 replaced ADR-017's stale "resolvable at n=100" with "resolvable at the retained sample size, subject to the floor", which still implies the floor establishes resolvability. It does not: 39 singleton clusters plus one 21-row cluster clears both count floors while Kish's effective sample size is only `3600/480 = 7.5`.
+2. **The exclusion rule was ambiguous.** ADR-021's table says "near match (dHash cluster)" while the implementation proposal said direct `dHash ≤ 3`. Hamming adjacency is not transitive, so a test receipt can reach a train receipt through an intermediate without being within distance 3 of it — the two readings exclude different rows.
+3. **Validation exclusion had no floor at all.** Train↔validation matches are excluded from validation, shrinking the checkpoint-selection set to an unknown, non-random size with no stated consequence.
+
+**Decision:**
+
+1. **ESS floor.** Add `min_effective_sample_size: 50` (Kish, `(Σn_c)² / Σn_c²` over retained test cluster sizes) alongside the existing 60-receipt and 40-cluster floors. `NOT EVALUABLE` is declared if **any** of the three fails. All three are explicitly **minimum-stability safeguards, not evidence that `X = 0.05` is resolvable**; precision above the floors remains outcome-dependent and the realized CI width is reported as such.
+2. **Exclusion propagates through connected components.** One graph is built over all 1000 receipts using the frozen edge signals (equal decoded-pixel hash, dHash ≤ 3, or equal value-inclusive ground-truth hash; the type-only template signature contributes no edges). A `test` receipt is excluded if its component contains any `train` or `validation` receipt, even indirectly; a `validation` receipt is excluded if its component contains any `train` receipt. `test`↔`test` matches never cause exclusion — they are retained and become the bootstrap resampling units. Components are computed once, before any exclusion.
+3. **Validation floor.** `min_retained_validation_receipts: 60`. Below it, Phase 4 checkpoint selection is `NOT EVALUABLE`, training halts, and the situation is escalated to the user. The selection estimand is named: "CORD v2 validation receipts with no exact or near duplicate in train".
+
+**Alternatives Considered:**
+- Direct-pair exclusion instead of component propagation: excludes fewer rows and keeps the test set larger, but leaves a `train — X — test` chain in place; rejected, since the conservative reading is the one that protects the held-out claim.
+- A simulation-based power justification instead of an ESS floor: more informative, but requires assuming an effect-size distribution before any data exists, which is a larger unregistered assumption than a stability floor; rejected for now, and explicitly not claimed in its place.
+- Leaving validation unfloored and deciding if it becomes small: rejected — that is precisely the post-hoc choice ADR-008's pre-registration requirement exists to prevent.
+
+**Consequences:**
+- Transitive propagation means a pathological chain could excise a large share of the test set. This is not absorbed silently: it surfaces as the floors firing and the result being `NOT EVALUABLE`, which is the correct outcome, since a test set that is largely a re-photograph of train cannot support a held-out claim.
+- `EVALUATION_PROTOCOL.md` §3 and §6 must record all three test floors, the validation floor, and the propagation rule when the pre-registration is promoted.
+- The audit implementation must compute components once over the full graph and report exclusion counts, retained counts, ESS, and realized validation size in every case, including when nothing is excluded.
