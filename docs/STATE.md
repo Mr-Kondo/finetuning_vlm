@@ -1,12 +1,12 @@
 # STATE.md — Current State
 
-**Last updated:** 2026-08-12 (Phase 2 entry gate reviewed — verdict BLOCK)
+**Last updated:** 2026-08-13 (Phase 2 entry gate: 2 review rounds, both BLOCK; D-1…D-4 decided; proposal at v3)
 
 This file must always reflect the latest state. Agents must always read this file before starting work in this repository ([[CLAUDE]] / [[AGENTS]]).
 
 ## Current Phase
 
-**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: the additional exit conditions in `IMPLEMENTATION_PLAN.md` remain OPEN, and the Phase 2 entry gate was run on 2026-08-12 and returned BLOCK — see "Phase 2 Entry Gate" below.**
+**Phase 1: Environment Setup + Data Preparation — the environment/dataset sub-scope is COMPLETE (implemented, locally validated, independently reviewed, and confirmed with a full, genuine `COLAB PASS` on real GPU hardware for both notebooks). Phase 1 as a whole is NOT complete: the additional exit conditions in `IMPLEMENTATION_PLAN.md` remain OPEN, and the Phase 2 entry gate has been run twice (2026-08-12 against v1, 2026-08-12/13 against v2) and returned BLOCK both times — see "Phase 2 Entry Gate" below. All four escalated user decisions are now resolved (ADR-017…ADR-021); the gate is blocked on specification and implementation work, not on decisions.**
 
 - Phase 0 is complete. The user approved the Phase 0 → Phase 1 transition explicitly; the ADR-005 adversarial-review gate for this transition was already satisfied by `reviews/phase_0_adversarial.md` (no new adversarial review was required to start Phase 1 — see that review and `reviews/phase_1_code_review.md` for the record).
 - This session's Phase 1 task was explicitly scoped to: repository/environment bootstrap, `notebooks/00_environment.ipynb`, `notebooks/01_dataset.ipynb`, `src/vlm_lab/data.py`, and local tests. It did **not** cover every exit condition listed in `IMPLEMENTATION_PLAN.md`'s Phase 1 section — see "Unresolved Open Items" below for what remains.
