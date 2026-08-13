@@ -709,10 +709,10 @@ Executing the §6.5 schema-generation algorithm against the **full** 900-record 
 
 ---
 
-## ADR-027: The Executed VRAM Gate Ran on a GPU Tier Other Than the One ADR-018 Pre-Registered — USER DECISION REQUIRED
+## ADR-027: The Executed VRAM Gate Ran on a GPU Tier Other Than the One ADR-018 Pre-Registered
 
 - **Date:** 2026-08-14
-- **Status:** Open — `USER DECISION REQUIRED`
+- **Status:** Accepted — decision made; the re-run itself is still outstanding (see Consequences)
 - **Trigger:** Real execution of `notebooks/01b_vram_gate.ipynb` on Colab, pushed back to `worktree-phase2-gate` as commit `3f3f44a`. Verified directly from the committed notebook JSON's `execution_count`/`outputs`, not from a summary.
 
 **Context:**
@@ -735,13 +735,11 @@ This is not a T4 by any measure — different architecture generation (Blackwell
 
 **What was and was not done about it:** nothing was changed. The real GO verdict and all four arms' measurements are committed as-is (`results/vram_gate_verdict.json`, plus the notebook's own outputs) as evidence that the protocol itself works, not as evidence that ADR-018's free-tier-T4 question is closed.
 
-**Decision:** Not yet made. Options for the user to choose among, or to reject in favor of another:
+**Decision:** The user chose to **re-run `notebooks/01b_vram_gate.ipynb` on an actual Colab free-tier T4** (Runtime → Change runtime type → T4 GPU, no Colab Pro/Pro+ credits spent), which is what ADR-018 asked for. ADR-018 itself is unchanged and stays in force as written: fp16 compute/load dtype, `attn_implementation="sdpa"`, pinned until a real T4 measurement says otherwise.
 
-1. **Re-run `notebooks/01b_vram_gate.ipynb` on an actual Colab free-tier T4** (Runtime → Change runtime type → T4 GPU, no Colab Pro/Pro+ credits spent), which is what ADR-018 asked for. This is the only option that directly closes ADR-018 as written.
-2. **Supersede ADR-018**: accept a larger tier deliberately, on the grounds that the free-tier T4 is no longer the intended target hardware. This would require a new ADR that (a) states the actual tier being committed to, (b) revisits the fp16/SDPA pin — a Blackwell-class GPU has no reason to forgo bf16 or fused attention kernels, so keeping T4-specific constraints on non-T4 hardware would be pure downside, and (c) accepts the cost/availability implications of that tier for every subsequent Colab-dependent phase, not only this gate.
-3. **Treat this run as informative but non-binding**, keep ADR-018 exactly as written, and require a real T4 measurement before the Phase 2 entry gate can close — i.e., functionally the same outcome as option 1, recorded explicitly as "this run did not count."
+Two alternatives were considered and rejected: superseding ADR-018 to accept the larger tier deliberately (would have required revisiting the fp16/SDPA pin, since Blackwell has no reason to forgo bf16 or fused attention, and accepting that tier's cost/availability for every later Colab-dependent phase); and treating the Blackwell run as merely informative while leaving the disposition unstated (rejected as under-specified — the user's choice makes the required next action concrete instead).
 
-**Consequences (once decided):**
-- If option 1 or 3: `notebooks/01b_vram_gate.ipynb` must be re-executed on a genuine T4 runtime before §9 item 8 / STATE.md Next Action 2 can be marked resolved; the current GO verdict stays in the repo as protocol-validation evidence but is not the pre-registered measurement.
-- If option 2: ADR-018 must be formally superseded (not edited in place, per `AGENTS.md`/`CLAUDE.md` §8's append-only ADR discipline), and every downstream document that currently assumes fp16/SDPA-on-T4 (`EXPERIMENT_SPEC.md`, `EVALUATION_PROTOCOL.md`, `docs/proposals/phase1_closure_prereg.md` §3) needs revisiting for the new tier.
-- Either way, this blocks §9 item 8 / STATE.md Next Action 2 from being marked complete until resolved.
+**Consequences:**
+- `notebooks/01b_vram_gate.ipynb` must be re-executed on a genuine T4 runtime before §9 item 8 / STATE.md Next Action 2 can be marked resolved. The Blackwell run's GO verdict and all four arms' real numbers stay in the repo (`results/vram_gate_verdict.json`, the notebook's own outputs) as evidence that the four-arm measurement protocol itself works correctly end-to-end, but they are not the pre-registered measurement and do not close this ADR's trigger.
+- If the real T4 run returns NO-GO, the documented fallback ladder for image resolution (ADR-018) is applied and the gate re-run before any tier decision is made; if it still returns NO-GO after that, an upgrade to an Ampere-or-newer tier becomes a new decision at that point, not this one.
+- This blocks §9 item 8 / STATE.md Next Action 2 from being marked complete until the real T4 run lands.
