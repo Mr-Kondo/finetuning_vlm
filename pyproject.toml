@@ -22,6 +22,25 @@ dependencies = [
     # transformers' AutoProcessor for Qwen3-VL pulls in a video-processor
     # sub-component that hard-requires torchvision, even for image-only use.
     "torchvision==0.28.0",
+    # QLoRA needs both halves of the design that were missing from this list:
+    # peft supplies LoraConfig / get_peft_model / prepare_model_for_kbit_training,
+    # bitsandbytes supplies the NF4 runtime quantization and paged_adamw_8bit.
+    "peft==0.20.0",
+    "bitsandbytes==0.50.0",
+    # transformers.Trainer delegates device placement and the fp16 grad-scaler
+    # path (the only usable path on T4, which has no bf16) to accelerate.
+    "accelerate==1.14.0",
+    # Validates model output against the normative JSON Schema 2020-12 document
+    # generated from the train+validation schema inventory.
+    "jsonschema==4.26.0",
+    # Reads configs/*.yaml, which hold every experiment parameter (AGENTS.md §17).
+    "pyyaml==6.0.3",
+    # The vendored Donut evaluator computes TED-Acc via zss.distance over the
+    # normalized ground-truth tree.
+    "zss==1.2.0",
+    # Also required by that same evaluator: the official donut/util.py imports
+    # nltk.edit_distance directly to compare leaf labels.
+    "nltk==3.10.3",
 ]
 
 [project.optional-dependencies]
