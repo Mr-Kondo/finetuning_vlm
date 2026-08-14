@@ -393,7 +393,7 @@ def audit_duplication(
     """
     _require_known_splits(receipts_by_split)
     records = [
-        _compute_receipt_signals(f"{split}:{row_index}", split, content)
+        compute_receipt_signals(f"{split}:{row_index}", split, content)
         for split, receipts in receipts_by_split.items()
         for row_index, content in enumerate(receipts)
     ]
@@ -460,9 +460,24 @@ class _DisjointSets:
         return tuple(sorted(tuple(sorted(members)) for members in members_by_root.values()))
 
 
-def _compute_receipt_signals(
+def compute_receipt_signals(
     receipt_id: ReceiptId, split: str, content: ReceiptContent
 ) -> ReceiptSignals:
+    """Hash one receipt's image and ground truth into its small `ReceiptSignals`.
+
+    `audit_duplication` calls this once per receipt and never touches
+    `content.image` again afterward. Exposed publicly so a caller with 1000
+    real, full-resolution receipt images can compute signals one receipt at a
+    time and let each decoded image be garbage-collected immediately, instead
+    of decoding and holding all of them at once just to satisfy
+    `audit_duplication`'s `Sequence[ReceiptContent]` contract -- materializing
+    1000 real CORD v2 images simultaneously is enough to exhaust a Colab
+    session's system RAM (see `docs/STATE.md`'s notes on this). Callers that
+    can afford to hold everything in memory (e.g. small test fixtures) should
+    keep using `audit_duplication` directly; this function plus
+    `build_duplication_graph` and `decide_exclusions` are the same algorithm,
+    decomposed for streaming.
+    """
     return ReceiptSignals(
         receipt_id=receipt_id,
         split=split,

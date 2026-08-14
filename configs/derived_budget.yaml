@@ -1,34 +1,34 @@
 schema_version: 1
-generated_at_utc: '2026-08-13T14:20:14.539070+00:00'
+generated_at_utc: '2026-08-14T04:02:30.963576+00:00'
 model_revision: ebb281ec70b05090aa6165b016eac8ec08e71b17
 dataset_revision: 7f0115a4b758a71d6473b8d085751692da2fef98
 processor_size:
-  longest_edge: 1048576
+  longest_edge: 524288
   shortest_edge: 200704
 patch_size: 16
 spatial_merge_size: 2
-image_token_ceiling: 1024
+image_token_ceiling: 512
 fixed_prompt_and_template_tokens: 321
-eval_prefix_upper_bound: 1345
+eval_prefix_upper_bound: 833
 max_new_tokens: 719
-max_seq_len: 2064
+max_seq_len: 1552
 measured_distributions:
   eval_prefix_len:
-    p50: 1329
-    p95: 1335
-    max: 1345
+    p50: 807
+    p95: 815
+    max: 833
   train_seq_len:
-    p50: 1409
-    p95: 1557
-    max: 1867
+    p50: 907
+    p95: 1048
+    max: 1376
   assistant_label_n:
     p50: 102
     p95: 250
     max: 575
   image_token_n:
-    p50: 1008
-    p95: 1014
-    max: 1024
+    p50: 486
+    p95: 494
+    max: 512
 schema:
   path: configs/cord_v2_output.schema.json
   sha256: 2c69ae8ab48b2d9b7558adba5cdde35780ab6c1034062890c10dc571fba741f9
